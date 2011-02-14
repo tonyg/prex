@@ -33,6 +33,6 @@
 int
 main(int argc, char *argv[])
 {
-	printf("Hello, world!\n");
+	printf("Hello, operator, from somewhere buried deep in some virtual world!\n");
 	return 0;
 }
