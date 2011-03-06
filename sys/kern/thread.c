@@ -447,6 +447,8 @@ thread_deallocate(thread_t t)
 	list_remove(&t->task_link);
 	list_remove(&t->link);
 	t->excbits = 0;
+	t->faultaddr = NULL;
+	t->faultflags = 0;
 	t->task->nthreads--;
 
 	if (zombie != NULL) {

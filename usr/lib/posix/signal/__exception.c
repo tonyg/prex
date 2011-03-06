@@ -42,6 +42,8 @@ static int __sig_exit;
 struct sigaction __sig_act[NSIG];
 sigset_t __sig_mask;
 sigset_t __sig_pending;
+void * __sig_faultaddr;
+uint32_t __sig_faultflags;
 
 #ifdef _REENTRANT
 volatile mutex_t __sig_lock;
@@ -97,8 +99,16 @@ __sig_flush(void)
 				/* User defined */
 				if (action.sa_flags & SA_SIGINFO) {
 					si.si_signo = sig;
-					si.si_code = 0;
 					si.si_value.sival_int = 0;
+					if (sig == SIGSEGV) {
+					  si.si_code = (__sig_faultflags & PAGE_FAULT_ACCESS_VIOLATION)
+					    ? SEGV_ACCERR
+					    : SEGV_MAPERR;
+					  si.si_addr = __sig_faultaddr;
+					} else {
+					  si.si_code = 0;
+					  si.si_addr = NULL;
+					}
 					action.sa_sigaction(sig, &si, NULL);
 				} else {
 					action.sa_handler(sig);
@@ -113,7 +123,6 @@ __sig_flush(void)
 			case SIGILL:
 			case SIGTRAP:
 			case SIGFPE:
-			case SIGSEGV:
 				for (;;);	/* exception from kernel */
 				break;
 			}
@@ -131,15 +140,19 @@ __sig_flush(void)
  * Exception handler for signal emulation
  */
 static void
-__exception_handler(int excpt)
+__exception_handler(int excpt, void *faultaddr, uint32_t faultflags)
 {
-
 	if (excpt > 0 && excpt <= NSIG) {
 
 		SIGNAL_LOCK();
 
-		if (__sig_act[excpt].sa_handler != SIG_IGN)
+		if (__sig_act[excpt].sa_handler != SIG_IGN) {
 			__sig_pending |= sigmask(excpt);
+			if (excpt == SIGSEGV) {
+			  __sig_faultaddr = faultaddr;
+			  __sig_faultflags = faultflags;
+			}
+		}
 
 		SIGNAL_UNLOCK();
 	}

@@ -69,7 +69,7 @@
 #define SCHED_OTHER	2	/* Other */
 
 /* Default exception handler */
-#define EXC_DFL		((void (*)(int)) -1)
+#define EXC_DFL		((void (*)(int, void *, uint32_t)) -1)
 
 /*
  * Synch initializer
@@ -77,10 +77,19 @@
 #define MUTEX_INITIALIZER	(mutex_t)0x4d496e69
 #define COND_INITIALIZER	(cond_t)0x43496e69
 
+/*
+ * Page fault flags.
+ */
+#define PAGE_FAULT_ACCESS_VIOLATION	0x01 /* set -> access violation; clear -> page was missing */
+#define PAGE_FAULT_WRITE_FAULT		0x02 /* set -> write fault; clear -> read fault */
+#define PAGE_FAULT_CAUSED_BY_USER	0x04 /* set -> fault caused by user; clear, see next bit */
+#define PAGE_FAULT_CAUSED_BY_SUPERVISOR	0x08 /* set -> caused by supervisor; clear, see prev bit */
+					     /* If neither USER nor SUPERVISOR, it's unknown. */
+#define PAGE_FAULT_INSTRUCTION_FETCH	0x10 /* set -> instruction fetch; clear -> other fetch */
 
 __BEGIN_DECLS
 void	exception_return(void);
-int	exception_setup(void (*handler)(int));
+int	exception_setup(void (*handler)(int, void *, uint32_t));
 int	exception_raise(task_t task, int excno);
 int	exception_wait(int *excno);
 

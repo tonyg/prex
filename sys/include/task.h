@@ -37,6 +37,7 @@
 #include <sys/sysinfo.h>
 #include <thread.h>
 #include <timer.h>
+#include <exception.h>
 
 /*
  * Task struct
@@ -50,7 +51,7 @@ struct task {
 	int		flags;		/* flags defined below */
 	cap_t		capability;	/* security permission flag */
 	struct timer	alarm;		/* timer for alarm exception */
-	void		(*handler)(int); /* pointer to exception handler */
+	exception_handler_t handler;	/* pointer to exception handler */
 	struct list	threads;	/* list of threads */
 	struct list	objects;	/* IPC objects owned by this task */
 	struct list	mutexes;	/* mutexes owned by this task */

@@ -96,6 +96,7 @@ struct siginfo {
 	int	si_signo;	/* redundant signal number */
 	int	si_code;	/* facility that raised this signal */
 	union sigval si_value;	/* value that was queued with signal */
+	void	*si_addr;	/* memory location causing fault */
 };
 
 typedef struct siginfo siginfo_t;
@@ -122,6 +123,10 @@ struct sigaction {
 #define	SA_DISABLE	0x0004	/* disable taking signals on alternate stack */
 #define SA_NOCLDSTOP	0x0008	/* do not generate SIGCHLD on child stop */
 #define SA_SIGINFO	0x0040	/* take sa_sigaction handler */
+
+/* si_code values for SIGSEGV siginfo_t. */
+#define SEGV_MAPERR 1
+#define SEGV_ACCERR 2
 
 /*
  * Flags for sigprocmask:

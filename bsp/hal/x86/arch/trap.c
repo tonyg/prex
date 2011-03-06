@@ -142,6 +142,18 @@ trap_handler(struct cpu_regs *regs)
 	if (regs->cs == KERNEL_CS)
 		panic("Kernel exception");
 
+	if (trap_no == 14) {
+	  uint32_t faultflags = 0;
+	  if (regs->err_code & 1) { faultflags |= PAGE_FAULT_ACCESS_VIOLATION; }
+	  if (regs->err_code & 2) { faultflags |= PAGE_FAULT_WRITE_FAULT; }
+	  faultflags |= (regs->err_code & 4)
+	    ? PAGE_FAULT_CAUSED_BY_USER
+	    : PAGE_FAULT_CAUSED_BY_SUPERVISOR;
+	  if (regs->err_code & 16) { faultflags |= PAGE_FAULT_INSTRUCTION_FETCH; }
+	  curthread->faultaddr = (void *) get_cr2();
+	  curthread->faultflags = faultflags;
+	}
+
 	exception_mark(exception_map[trap_no]);
 	exception_deliver();
 }

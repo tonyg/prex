@@ -61,6 +61,8 @@ struct thread {
 	struct timer 	timeout;	/* thread timer */
 	struct timer	*periodic;	/* pointer to periodic timer */
 	uint32_t 	excbits;	/* bitmap of pending exceptions */
+	void		*faultaddr;	/* address of most recent page fault */
+	uint32_t	faultflags;	/* most recent page fault flags */
 	struct list 	mutexes;	/* mutexes locked by this thread */
 	mutex_t 	mutex_waiting;	/* mutex pointer currently waiting */
 	struct queue 	ipc_link;	/* linkage on IPC queue */
@@ -98,6 +100,16 @@ struct thread {
 #define SOP_SETPRI	1	/* set scheduling priority */
 #define SOP_GETPOLICY	2	/* get scheduling policy */
 #define SOP_SETPOLICY	3	/* set scheduling policy */
+
+/*
+ * Page fault flags.
+ */
+#define PAGE_FAULT_ACCESS_VIOLATION	0x01 /* set -> access violation; clear -> page was missing */
+#define PAGE_FAULT_WRITE_FAULT		0x02 /* set -> write fault; clear -> read fault */
+#define PAGE_FAULT_CAUSED_BY_USER	0x04 /* set -> fault caused by user; clear, see next bit */
+#define PAGE_FAULT_CAUSED_BY_SUPERVISOR	0x08 /* set -> caused by supervisor; clear, see prev bit */
+					     /* If neither USER nor SUPERVISOR, it's unknown. */
+#define PAGE_FAULT_INSTRUCTION_FETCH	0x10 /* set -> instruction fetch; clear -> other fetch */
 
 __BEGIN_DECLS
 int	 thread_create(task_t, thread_t *);

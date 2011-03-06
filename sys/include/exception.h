@@ -33,14 +33,16 @@
 #include <types.h>
 #include <sys/cdefs.h>
 
+typedef void (*exception_handler_t)(int, void *, uint32_t);
+
 /* Number of exceptions */
 #define	NEXC		32
 
 /* Default exception handler */
-#define EXC_DFL		((void (*)(int)) -1)
+#define EXC_DFL		((exception_handler_t) -1)
 
 __BEGIN_DECLS
-int	 exception_setup(void (*)(int));
+int	 exception_setup(exception_handler_t);
 int	 exception_raise(task_t, int);
 int	 exception_post(task_t, int);
 int	 exception_wait(int *);

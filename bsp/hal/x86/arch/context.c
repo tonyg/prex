@@ -59,11 +59,13 @@
  * values except a stack pointer are reset to default value.
  */
 void
-context_set(context_t ctx, int type, register_t val)
+context_set(context_t ctx, int type_and_param, register_t val)
 {
 	struct kern_regs *k;
 	struct cpu_regs *u;
 	uint32_t *argp;
+	int type = type_and_param & 0xff;
+	int param = type_and_param >> 8;
 
 	k = &ctx->kregs;
 
@@ -115,7 +117,7 @@ context_set(context_t ctx, int type, register_t val)
 	case CTX_UARG:
 		/* User mode argument */
 		u = ctx->uregs;
-		argp = (uint32_t *)(u->esp + sizeof(uint32_t));
+		argp = (uint32_t *)(u->esp + (param + 1) * sizeof(uint32_t));
 		copyout(&val, argp, sizeof(uint32_t));
 		break;
 
@@ -178,7 +180,7 @@ context_save(context_t ctx)
 	ctx->saved_regs = sav;
 
 	/* Adjust stack pointer */
-	cur->esp = (uint32_t)sav - (sizeof(uint32_t) * 2);
+	cur->esp = (uint32_t)sav - (sizeof(uint32_t) * 4);
 }
 
 /*

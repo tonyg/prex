@@ -78,6 +78,7 @@
 #include <task.h>
 #include <hal.h>
 #include <exception.h>
+#include <sys/signal.h>
 
 static struct event	exception_event;
 
@@ -94,7 +95,7 @@ static struct event	exception_event;
  * the previous handler.
  */
 int
-exception_setup(void (*handler)(int))
+exception_setup(exception_handler_t handler)
 {
 	task_t self = curtask;
 	list_t head, n;
@@ -309,7 +310,7 @@ void
 exception_deliver(void)
 {
 	task_t self = curtask;
-	void (*handler)(int);
+	exception_handler_t handler;
 	uint32_t bitmap;
 	int s, excno;
 
@@ -345,7 +346,14 @@ exception_deliver(void)
 		s = splhigh();
 		context_save(&curthread->ctx);
 		context_set(&curthread->ctx, CTX_UENTRY, (register_t)handler);
-		context_set(&curthread->ctx, CTX_UARG, (register_t)excno);
+		context_set(&curthread->ctx, CTX_UARG | (0 << 8), (register_t) excno);
+		if (excno == SIGSEGV) {
+		  context_set(&curthread->ctx, CTX_UARG | (1 << 8), (register_t) curthread->faultaddr);
+		  context_set(&curthread->ctx, CTX_UARG | (2 << 8), (register_t) curthread->faultflags);
+		} else {
+		  context_set(&curthread->ctx, CTX_UARG | (1 << 8), (register_t) 0);
+		  context_set(&curthread->ctx, CTX_UARG | (2 << 8), (register_t) 0);
+		}
 		curthread->excbits &= ~(1 << excno);
 		splx(s);
 	}
