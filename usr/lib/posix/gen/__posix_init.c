@@ -30,6 +30,7 @@
 #include <sys/prex.h>
 #include <sys/posix.h>
 
+extern void __mmap_init(void);
 extern void __exception_init(void);
 extern void __process_init(void);
 extern void __file_init(void);
@@ -37,6 +38,7 @@ extern void __file_init(void);
 void
 __posix_init(void)
 {
+	__mmap_init();
 	__exception_init();
 	__process_init();
 	__file_init();

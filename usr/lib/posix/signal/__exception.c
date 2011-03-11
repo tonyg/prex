@@ -142,6 +142,14 @@ __sig_flush(void)
 static void
 __exception_handler(int excpt, void *faultaddr, uint32_t faultflags)
 {
+	if (excpt == SIGSEGV) {
+	  extern int __mmap_handle_segv(void *, uint32_t);
+	  if (__mmap_handle_segv(faultaddr, faultflags)) {
+	    exception_return();
+	    return; /* notreached */
+	  }
+	}
+
 	if (excpt > 0 && excpt <= NSIG) {
 
 		SIGNAL_LOCK();
