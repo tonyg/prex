@@ -2,6 +2,10 @@ SUBDIR:=	bsp sys usr
 SRCDIR:=	$(CURDIR)
 export SRCDIR
 
+# pjd - force debug build
+_DEBUG_=1
+export _DEBUG_
+
 include $(SRCDIR)/mk/image.mk
 
 #
