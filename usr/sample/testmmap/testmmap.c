@@ -58,7 +58,9 @@ static void try_mmap(void) {
   dumpbyte(addr, 0);
   dumpbyte(addr, 15);
   dumpbyte(addr, 8000);
-  dumpbyte(addr, 40000);
+  dumpbyte(addr, MAPPED_FILE_LENGTH - 1);
+  printf("Should fault now, as we're reading past the end of our mapping.\n");
+  dumpbyte(addr, MAPPED_FILE_LENGTH);
 }
 
 int main(int argc, char *argv[])
