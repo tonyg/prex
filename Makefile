@@ -18,3 +18,6 @@ fd.img: all prexos
 
 run: fd.img
 	qemu -curses -fda fd.img
+
+debug: fd.img
+	qemu -s -S -curses -fda fd.img
