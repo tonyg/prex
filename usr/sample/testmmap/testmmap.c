@@ -15,6 +15,7 @@ static void segv_handler(int signo, siginfo_t *si, void *context) {
 }
 
 #define MAPPED_FILE_PATH "/tmp/mappedfile"
+#define MAPPED_FILE_LENGTH 16384
 
 static char hexchar(int n) {
   return ("0123456789abcdef")[n % 16];
@@ -23,7 +24,7 @@ static char hexchar(int n) {
 static void setup_file(void) {
   int fd;
   int n;
-  static char buffer[16384];
+  static char buffer[MAPPED_FILE_LENGTH];
 
   for (n = 0; n < sizeof(buffer); n++) {
     buffer[n] = hexchar(n);
@@ -48,7 +49,7 @@ static void try_mmap(void) {
   char *addr;
 
   ICHECK(fd = open(MAPPED_FILE_PATH, O_RDONLY));
-  addr = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, fd, 0);
+  addr = mmap(NULL, MAPPED_FILE_LENGTH, PROT_READ, MAP_PRIVATE, fd, 0);
   if (addr == MAP_FAILED) {
     perror("mmap");
     exit(1);
