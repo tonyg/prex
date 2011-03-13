@@ -13,11 +13,8 @@ CPPFLAGS+=	$(DEFINES) -I. $(addprefix -I,$(INCSDIR))
 ACPPFLAGS+=	-D__ASSEMBLY__
 LDFLAGS+=	-static -nostdlib $(addprefix -L,$(LIBSDIR))
 
-ifeq ($(_DEBUG_),1)
+ASFLAGS+=-g
 CFLAGS+=	-fno-omit-frame-pointer -g
-else
-CFLAGS+=	-fomit-frame-pointer
-endif
 
 ifeq ($(_KERNEL_),1)
 CFLAGS+=	-fno-builtin
