@@ -15,8 +15,10 @@
 
 /**
  * Limited implementation of mmap().
- * We only support prot==PROT_READ and flags==MAP_PRIVATE|MAP_FILE for now.
- */
+ * We only support prot==PROT_READ and flags==MAP_PRIVATE|MAP_FILE for
+ * now.  We don't transmute a SIGSEGV into SIGBUS when the user
+ * attempts to read past the end of the file. Basically, many of the
+ * subtleties of mmap() remain unimplemented. */
 extern void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 
 #endif
