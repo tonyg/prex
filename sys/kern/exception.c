@@ -299,6 +299,18 @@ exception_mark(int excno)
 /*
  * exception_deliver - deliver pending exception to the task.
  *
+ * Simply calls exception_deliver_fault with dummy placeholder values.
+ */
+void
+exception_deliver(void)
+{
+	exception_deliver_fault(NULL, 0);
+}
+
+/*
+ * exception_deliver_fault - deliver pending exception, possibly with
+ * fault information, to the task.
+ *
  * Check if pending exception exists for the current task, and
  * deliver it to the exception handler if needed. All
  * exceptions are delivered at the time when the control goes
@@ -307,7 +319,7 @@ exception_mark(int excno)
  * saved to the user mode stack.
  */
 void
-exception_deliver(void)
+exception_deliver_fault(void *faultaddr, uint32_t faultflags)
 {
 	task_t self = curtask;
 	exception_handler_t handler;
@@ -348,8 +360,8 @@ exception_deliver(void)
 		context_set(&curthread->ctx, CTX_UENTRY, (register_t)handler);
 		context_set(&curthread->ctx, CTX_UARG | (0 << 8), (register_t) excno);
 		if (excno == SIGSEGV) {
-		  context_set(&curthread->ctx, CTX_UARG | (1 << 8), (register_t) curthread->faultaddr);
-		  context_set(&curthread->ctx, CTX_UARG | (2 << 8), (register_t) curthread->faultflags);
+		  context_set(&curthread->ctx, CTX_UARG | (1 << 8), (register_t) faultaddr);
+		  context_set(&curthread->ctx, CTX_UARG | (2 << 8), (register_t) faultflags);
 		} else {
 		  context_set(&curthread->ctx, CTX_UARG | (1 << 8), (register_t) 0);
 		  context_set(&curthread->ctx, CTX_UARG | (2 << 8), (register_t) 0);

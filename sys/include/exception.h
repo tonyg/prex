@@ -48,6 +48,7 @@ int	 exception_post(task_t, int);
 int	 exception_wait(int *);
 void	 exception_mark(int);
 void	 exception_deliver(void);
+void	 exception_deliver_fault(void *, uint32_t);
 void	 exception_return(void);
 void	 exception_init(void);
 __BEGIN_DECLS

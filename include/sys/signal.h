@@ -40,6 +40,7 @@
 #define NSIG	32		/* counting 0; could be 33 (mask is 1-32) */
 
 #include <machine/signal.h>	/* sigcontext */
+#include <machine/types.h>	/* uint32_t */
 
 #define	SIGHUP	1	/* hangup */
 #define	SIGINT	2	/* interrupt */
@@ -200,6 +201,7 @@ extern sigset_t __sig_pending;
 __BEGIN_DECLS
 void	(*signal(int, void (*)(int)))(int);
 int	__sig_flush(void);
+int	__sig_flush_fault(void *, uint32_t);
 __END_DECLS
 
 #endif /* !KERNEL */

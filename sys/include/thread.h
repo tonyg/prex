@@ -61,8 +61,6 @@ struct thread {
 	struct timer 	timeout;	/* thread timer */
 	struct timer	*periodic;	/* pointer to periodic timer */
 	uint32_t 	excbits;	/* bitmap of pending exceptions */
-	void		*faultaddr;	/* address of most recent page fault */
-	uint32_t	faultflags;	/* most recent page fault flags */
 	struct list 	mutexes;	/* mutexes locked by this thread */
 	mutex_t 	mutex_waiting;	/* mutex pointer currently waiting */
 	struct queue 	ipc_link;	/* linkage on IPC queue */

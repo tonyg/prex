@@ -42,21 +42,30 @@ static int __sig_exit;
 struct sigaction __sig_act[NSIG];
 sigset_t __sig_mask;
 sigset_t __sig_pending;
-void * __sig_faultaddr;
-uint32_t __sig_faultflags;
 
 #ifdef _REENTRANT
 volatile mutex_t __sig_lock;
 #endif
 
+int
+__sig_flush(void)
+{
+	return __sig_flush_fault(NULL, 0);
+}
+
 /*
  * Process all pending and unmasked signal
+ *
+ * FIXME: faultaddr propagation is still broken in the case of
+ * multiple threads.  One thread could call __sig_flush, while another
+ * calls __sig_flush_fault, and the __sig_flush thread could dispatch
+ * the SIGSEGV, even though it's missing the fault address and flags.
  *
  * return 0 if at least one pending signal was processed.
  * return -1 if no signal was processed.
  */
 int
-__sig_flush(void)
+__sig_flush_fault(void *faultaddr, uint32_t faultflags)
 {
 	int sig;
 	sigset_t active, org_mask;
@@ -101,10 +110,10 @@ __sig_flush(void)
 					si.si_signo = sig;
 					si.si_value.sival_int = 0;
 					if (sig == SIGSEGV) {
-					  si.si_code = (__sig_faultflags & PAGE_FAULT_ACCESS_VIOLATION)
+					  si.si_code = (faultflags & PAGE_FAULT_ACCESS_VIOLATION)
 					    ? SEGV_ACCERR
 					    : SEGV_MAPERR;
-					  si.si_addr = __sig_faultaddr;
+					  si.si_addr = faultaddr;
 					} else {
 					  si.si_code = 0;
 					  si.si_addr = NULL;
@@ -156,15 +165,11 @@ __exception_handler(int excpt, void *faultaddr, uint32_t faultflags)
 
 		if (__sig_act[excpt].sa_handler != SIG_IGN) {
 			__sig_pending |= sigmask(excpt);
-			if (excpt == SIGSEGV) {
-			  __sig_faultaddr = faultaddr;
-			  __sig_faultflags = faultflags;
-			}
 		}
 
 		SIGNAL_UNLOCK();
 	}
-	__sig_flush();
+	__sig_flush_fault(faultaddr, faultflags);
 	exception_return();
 }
 
