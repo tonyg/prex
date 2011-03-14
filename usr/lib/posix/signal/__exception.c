@@ -109,7 +109,9 @@ __sig_flush_fault(void *faultaddr, uint32_t faultflags)
 				if (action.sa_flags & SA_SIGINFO) {
 					si.si_signo = sig;
 					si.si_value.sival_int = 0;
-					if (sig == SIGSEGV) {
+					if (sig == SIGSEGV &&
+					    (faultflags & PAGE_FAULT_ADDRESS_VALID))
+					{
 					  si.si_code = (faultflags & PAGE_FAULT_ACCESS_VIOLATION)
 					    ? SEGV_ACCERR
 					    : SEGV_MAPERR;

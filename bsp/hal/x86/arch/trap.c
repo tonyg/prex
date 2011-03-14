@@ -145,7 +145,7 @@ trap_handler(struct cpu_regs *regs)
 	exception_mark(exception_map[trap_no]);
 
 	if (trap_no == 14) {
-	  uint32_t faultflags = 0;
+	  uint32_t faultflags = PAGE_FAULT_ADDRESS_VALID;
 	  void *faultaddr = (void *) get_cr2();
 
 	  if (regs->err_code & 1) { faultflags |= PAGE_FAULT_ACCESS_VIOLATION; }
