@@ -55,7 +55,7 @@ __mmap_map_page(mapping_t *mapping, void *pagev) {
   uint8_t *page = (uint8_t *) pagev;
   off_t required_offset = page - mapping->baseaddr;
 
-  printf("Mapping %p from fd %d at offset %x\n", page, mapping->fd, required_offset);
+  /* printf("Mapping %p from fd %d at offset %x\n", page, mapping->fd, required_offset); */
 
   if (required_offset != mapping->curroffset) {
     mapping->curroffset = lseek(mapping->fd, required_offset, SEEK_SET);
@@ -119,7 +119,7 @@ __mmap_handle_segv(void *faultaddr, uint32_t faultflags)
     if (((uint8_t *) faultaddr >= mapping->baseaddr) &&
 	((uint8_t *) faultaddr < mapping->limitaddr))
       {
-	printf("Fault at %p\n", faultaddr);
+	/* printf("Fault at %p\n", faultaddr); */
 	__mmap_map_page(mapping, round_to_page(faultaddr));
 	return 1;
       }
