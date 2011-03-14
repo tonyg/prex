@@ -1,9 +1,8 @@
 #ifndef _SYS_MMAN_H_
 #define _SYS_MMAN_H_
 
-#define PROT_READ	0x1
-#define PROT_WRITE	0x2
-#define PROT_EXEC	0x4
+/* PROT_READ, PROT_WRITE, and PROT_EXEC are the same as in prex.h, used with vm_attribute(). */
+#include <sys/prex.h>
 #define PROT_NONE	0
 
 #define MAP_SHARED	0x1

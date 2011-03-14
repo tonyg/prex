@@ -93,6 +93,13 @@ __mmap_map_page(mapping_t *mapping, void *pagev) {
       exit(-1);
     }
   }
+
+  /* We only implement PROT_READ for now. */
+  errno = vm_attribute(task_self(), page, PROT_READ);
+  if (errno != 0) {
+    perror("__mmap_map_page vm_attribute");
+    exit(-1);
+  }
 }
 
 int
