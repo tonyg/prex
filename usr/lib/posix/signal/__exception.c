@@ -153,7 +153,7 @@ __sig_flush_fault(void *faultaddr, uint32_t faultflags)
 static void
 __exception_handler(int excpt, void *faultaddr, uint32_t faultflags)
 {
-	if (excpt == SIGSEGV) {
+	if ((excpt == SIGSEGV) && (faultflags & PAGE_FAULT_ADDRESS_VALID)) {
 	  extern int __mmap_handle_segv(void *, uint32_t);
 	  if (__mmap_handle_segv(faultaddr, faultflags)) {
 	    exception_return();
