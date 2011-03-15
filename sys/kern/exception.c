@@ -337,9 +337,15 @@ exception_deliver_fault(void *faultaddr, uint32_t faultflags)
 		/*
 		 * Find a pending exception.
 		 */
-		for (excno = 0; excno < NEXC; excno++) {
-			if (bitmap & (1 << excno))
-				break;
+		if (bitmap & (1 << SIGSEGV)) {
+			/* Prioritize SIGSEGV to avoid losing
+			   faultaddr information, if we have any. */
+			excno = SIGSEGV;
+		} else {
+			for (excno = 0; excno < NEXC; excno++) {
+				if (bitmap & (1 << excno))
+					break;
+			}
 		}
 		handler = self->handler;
 		if (handler == EXC_DFL) {

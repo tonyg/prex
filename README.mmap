@@ -29,7 +29,9 @@ Kernel, architecture-independent:
    delivery; a better approach might be to treat delivery of a
    fault-address-carrying SIGSEGV specially, on a totally disjoint
    code path, to avoid any opportunity for losing the
-   faultaddr/faultflags.
+   faultaddr/faultflags. (For now, as a cheap hack, we prioritize
+   SIGSEGV, so that if a SIGSEGV is pending, it will be delivered
+   first.)
 
  - A set of architecture-neutral flags describing a page fault is
    defined in thread.h (for kernel use) and prex.h (for application
