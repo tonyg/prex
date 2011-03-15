@@ -54,6 +54,7 @@ static void try_mmap(void) {
     perror("mmap");
     exit(1);
   }
+  ICHECK(close(fd));
   printf("mmap returned %p\n", addr);
   dumpbyte(addr, 0);
   dumpbyte(addr, 15);

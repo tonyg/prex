@@ -84,9 +84,12 @@ Test code:
  - Trivial timing application, timemmap, that measures the latency
    accessing single bytes from pages in a mapped region, to give some
    impression of the difference between faulting in a page for the
-   first time and accessing an already-faulted-in page.
+   first time and accessing an already-faulted-in page. It also
+   accesses pages from low to high and from high to low addresses, to
+   show the difference between seeking and avoiding seeking.
 
    (In qemu, on the Pentium 4 desktop I have available to me, I see
    ~520 microseconds latency on accessing an mmap()ed page that has
-   not been read into memory yet. After this initial latency,
+   not been read into memory yet if no seek is required, and ~540
+   microseconds if a seek is required. After this initial latency,
    accessing the page is as fast as any other memory access.)
