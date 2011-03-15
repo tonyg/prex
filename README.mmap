@@ -24,7 +24,12 @@ Kernel, architecture-independent:
    trap handlers to the code responsible for filling in the exception
    handler stack frame through new arguments to the exception delivery
    mechanism. This lets us avoid ever writing fault information
-   anywhere but on the stack of the active faulting thread.
+   anywhere but on the stack of the active faulting thread. There's
+   still a problem if a lower-numbered signal is already marked for
+   delivery; a better approach might be to treat delivery of a
+   fault-address-carrying SIGSEGV specially, on a totally disjoint
+   code path, to avoid any opportunity for losing the
+   faultaddr/faultflags.
 
  - A set of architecture-neutral flags describing a page fault is
    defined in thread.h (for kernel use) and prex.h (for application
