@@ -12,8 +12,11 @@ fd.img: all prexos
 	mformat -i fd.img -a -C -f 1440 -B bsp/boot/x86/tools/bootsect/bootsect.bin ::
 	mcopy -i fd.img prexos ::
 
-run: fd.img
+curses: fd.img
 	qemu -curses -fda fd.img
+
+run: fd.img
+	qemu -fda fd.img
 
 debug: fd.img
 	qemu -s -S -curses -fda fd.img
