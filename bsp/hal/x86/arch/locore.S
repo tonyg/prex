@@ -313,11 +313,23 @@ ENTRY(syscall_entry)
 	pushl	$(SYSCALL_INT)		/* Trap number */
 	SAVE_ALL
 	SETUP_SEG
-	call	syscall_handler
+	/* We check the saved value of eax here, before calling syscall_handler,
+	   because if it's zero (i.e. exception_return), we will completely
+	   obliterate the saved registers in context_restore() within
+	   exception_return() within syscall_handler(), which will make the value
+	   of 0x10(%esp) contain whatever random eax value happened to be around
+	   at the time the exception was delivered. For example, if the exn
+	   was a page fault, eax could be anything at all. If we check 0x10(%esp)
+	   after syscall_handler has returned, it will in the general case contain
+	   junk. */
 	cmpl	$0, 0x10(%esp)		/* Skip setting eax if exception_return */
 	je	1f
+	call	syscall_handler
 	movl	%eax, 0x10(%esp)	/* Set return value to eax */
+	jmp	2f
 1:
+	call	syscall_handler
+2:
 	call	exception_deliver	/* Check exception */
 syscall_ret:
 	RESTORE_ALL
