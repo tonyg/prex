@@ -2,6 +2,9 @@ SUBDIR:=	bsp sys usr
 SRCDIR:=	$(CURDIR)
 export SRCDIR
 
+_DEBUG_=1
+export _DEBUG_
+
 include $(SRCDIR)/mk/image.mk
 
 #
