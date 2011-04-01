@@ -92,6 +92,7 @@ device		null		# NULL device
 device		zero		# Zero device
 device		ramdisk		# RAM disk
 device		fdd		# Floppy disk drive
+device		pci		# PCI bus
 device		hdd		# Hard disk drive
 
 #

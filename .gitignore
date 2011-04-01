@@ -2,6 +2,7 @@
 *.a
 *.rt
 *.ko
+*.sym
 
 bsp/boot/bootldr
 bsp/boot/x86/tools/bootsect/bootsect.bin
@@ -11,6 +12,7 @@ conf/config.ld
 conf/config.mk
 conf/drvtab.h
 fd.img
+hd.raw
 prexos
 sys/prex
 usr/bin/cmdbox/cmdbox
