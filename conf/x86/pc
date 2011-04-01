@@ -92,6 +92,7 @@ device		null		# NULL device
 device		zero		# Zero device
 device		ramdisk		# RAM disk
 device		fdd		# Floppy disk drive
+device		hdd		# Hard disk drive
 
 #
 # Hardware configuations
