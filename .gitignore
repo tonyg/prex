@@ -13,6 +13,7 @@ conf/config.mk
 conf/drvtab.h
 fd.img
 hd.raw
+image.iso
 prexos
 sys/prex
 usr/bin/cmdbox/cmdbox

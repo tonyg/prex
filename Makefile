@@ -15,6 +15,9 @@ fd.img: all prexos
 	mformat -i fd.img -a -C -f 1440 -B bsp/boot/x86/tools/bootsect/bootsect.bin ::
 	mcopy -i fd.img prexos ::
 
+image.iso: fd.image
+	genisoimage -b fd.img -o image.iso fd.img
+
 hd.raw:
 	qemu-img create $@ 20M
 
