@@ -113,24 +113,33 @@ static void probe_pci(void) {
     v->bus = bus;
     v->slot = dev;
 
-    v->vendor_id = read_pci16(bus, dev, 0, 0);
+    v->vendor_id = read_pci16(bus, dev, 0, PCI_REGISTER_VENDOR_ID);
     if (v->vendor_id != 0xffff) { /* all-ones is PCI's way of saying "what register?" */
       pci_device_count = dev + 1;
-      v->device_id = read_pci16(bus, dev, 0, 2);
-      v->revision_id = read_pci8(bus, dev, 0, 8);
-      v->prog_if = read_pci8(bus, dev, 0, 9);
-      v->subclass = read_pci8(bus, dev, 0, 10);
-      v->class_code = read_pci8(bus, dev, 0, 11);
-      v->cache_line_size = read_pci8(bus, dev, 0, 12);
-      v->latency_timer = read_pci8(bus, dev, 0, 13);
-      v->header_type = read_pci8(bus, dev, 0, 14);
-      v->bist = read_pci8(bus, dev, 0, 15);
+      v->device_id = read_pci16(bus, dev, 0, PCI_REGISTER_DEVICE_ID);
+      v->revision_id = read_pci8(bus, dev, 0, PCI_REGISTER_REVISION_ID);
+      v->prog_if = read_pci8(bus, dev, 0, PCI_REGISTER_PROG_IF);
+      v->subclass = read_pci8(bus, dev, 0, PCI_REGISTER_SUBCLASS);
+      v->class_code = read_pci8(bus, dev, 0, PCI_REGISTER_CLASS_CODE);
+      v->cache_line_size = read_pci8(bus, dev, 0, PCI_REGISTER_CACHE_LINE_SIZE);
+      v->latency_timer = read_pci8(bus, dev, 0, PCI_REGISTER_LATENCY_TIMER);
+      v->header_type = read_pci8(bus, dev, 0, PCI_REGISTER_HEADER_TYPE);
+      v->bist = read_pci8(bus, dev, 0, PCI_REGISTER_BIST);
 
-      printf("PCI #%02x %04X:%04X rev=%02X class=%02X:%02X:%02X\n",
+      if ((v->header_type & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_GENERAL) {
+	v->subsystem_vendor_id = read_pci8(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_VENDOR_ID);
+	v->subsystem_id = read_pci8(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_ID);
+      } else {
+	v->subsystem_vendor_id = 0xffff;
+	v->subsystem_id = 0xffff;
+      }
+
+      printf("PCI #%02x %04X:%04X/%04X:%04X class=%02X:%02X rev=%02X progIF=%02X\n",
 	     dev,
 	     v->vendor_id, v->device_id,
-	     v->revision_id,
-	     v->class_code, v->subclass, v->prog_if);
+	     v->subsystem_vendor_id, v->subsystem_id,
+	     v->class_code, v->subclass,
+	     v->revision_id, v->prog_if);
     }
   }
 }

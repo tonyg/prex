@@ -79,6 +79,9 @@ struct pci_device {
   uint8_t latency_timer;
   uint8_t header_type;
   uint8_t bist;
+
+  uint16_t subsystem_vendor_id;
+  uint16_t subsystem_id;
 };
 
 extern struct pci_device pci_devices[];
