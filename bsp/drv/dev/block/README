@@ -1,0 +1,9 @@
+NEXT TO DO
+---------------------------------------------------------------------------
+
+Make the device_create()d devices into *partitions* rather than whole
+disks. Perhaps do this by making ata_disk structures kmem_alloc'd, and
+making it a variant union, with variants for
+
+       - whole disks (include model number and stuff)
+       - disk partitions (include offset and length)
