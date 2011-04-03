@@ -19,7 +19,7 @@
 #define DPRINTF(a)
 #endif
 
-#define BUFFER_LENGTH 4096 /* FIXME: proper caching please */
+#define BUFFER_LENGTH 65536 /* FIXME: proper caching please */
 
 struct hdd_softc {
   device_t dev;
@@ -44,6 +44,7 @@ static void hdc_ist(void *arg) {
 static void setup_device(struct driver *self, struct pci_device *v) {
   static char which_device = '0';
   char devname_tmp[4];
+  int old_fashioned = 0;
 
   struct hdd_softc *sc;
   struct irp *irp;
@@ -53,13 +54,16 @@ static void setup_device(struct driver *self, struct pci_device *v) {
      it, it's an IRQ-configurable device. */
   write_pci_interrupt_line(v, 0xfe);
   if (read_pci_interrupt_line(v) != 0xfe) {
-    /* Nope. Legacy horror. Punt? */
-    printf("Not trying to cope with legacy hardware at the moment\n");
-    return;
+    /* Nope. Legacy horror. Punt if we can't tell it's a regular old IDE. */
+    if ((v->class_code == 1) && (v->subclass == 1) &&
+	((v->prog_if == 0x8a) || (v->prog_if == 0x80)))
+    {
+      old_fashioned = 1;
+    } else {
+      printf("Not trying to cope with legacy hardware at the moment\n");
+      return;
+    }
   }
-
-  /* At this point, we know our device likes to be told which IRQ to
-     use. */
 
   {
     char *n = &devname_tmp[0];
@@ -88,6 +92,11 @@ static void setup_device(struct driver *self, struct pci_device *v) {
   irp = &sc->irp;
   irp->cmd = IO_NONE;
   event_init(&irp->iocomp, &sc->devname[0]);
+
+  /* TODO: if old_fashioned == 1, we are an old school IDE adapter,
+     which wants to use IRQ14 for the primary and IRQ15 for the
+     secondary controller. We currently only take one IRQ, so
+     secondary controllers won't work. */
 
   /* TODO: claiming an IRQ more than once causes, um, issues, so don't do that. Ever. */
   sc->irq = irq_attach(HDC_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, sc);
