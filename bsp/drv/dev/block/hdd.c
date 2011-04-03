@@ -1,6 +1,8 @@
 #include <driver.h>
 #include <pci.h>
 
+typedef unsigned long long uint64_t; /* Hmm. */
+
 /* Much of the content of this driver was worked out using
    wiki.osdev.org, the FreeBSD source code and the grub2 source code
    as references, though no code was copied from those sources. The
@@ -9,6 +11,7 @@
    http://www.intel.com/design/chipsets/datashts/29054901.pdf
    http://www.intel.com/assets/pdf/datasheet/290562.pdf
    http://www.t13.org/Documents/UploadedDocuments/project/d0948r4c-ATA-2.pdf
+   http://www.t13.org/Documents/UploadedDocuments/docs2007/D1699r4a-ATA8-ACS.pdf
 */
 
 #define HDC_IRQ		14	/* Yeah, there are more than 16 these days.
@@ -20,6 +23,8 @@
  * FIXME: OK, sharing *would* be fine, but see the comment in the
  * implementation of irq_attach that says that sharing isn't supported
  * by prex. */
+
+#define SECTOR_SIZE	512
 
 typedef enum ata_port_register_t_ {
   ATA_REG_DATA = 0,
@@ -63,6 +68,7 @@ typedef enum ata_status_flag_t_ {
 #endif
 
 #define BUFFER_LENGTH 65536 /* FIXME: proper caching please */
+#define BUFFER_LENGTH_IN_SECTORS (BUFFER_LENGTH / SECTOR_SIZE)
 
 struct ata_channel {
   int base_port;
@@ -84,7 +90,7 @@ struct ata_disk {
   int lba_supported;
   int dma_supported;
   uint32_t sector_capacity;
-  uint32_t addressable_sector_count;
+  uint64_t addressable_sector_count;
 
   char devname[6]; /* "hdXdX\0" TODO: fix magic number */
   device_t dev; /* the PREX device */
@@ -95,21 +101,12 @@ struct ata_controller {
   struct pci_device *pci_dev;
   int isopen; /* FIXME: do we care? */
   struct irp irp;
+  struct ata_disk *active_disk; /* disk using the irp right now */
   irq_t irq;
   struct ata_channel channel[2];
   struct ata_disk disk[4];
   uint8_t *buffer;
 };
-
-static int hdc_isr(void *arg) {
-  struct ata_controller *c = arg;
-  DPRINTF(("hdc_isr\n"));
-}
-
-static void hdc_ist(void *arg) {
-  struct ata_controller *c = arg;
-  DPRINTF(("hdc_ist\n"));
-}
 
 static void ata_write(struct ata_controller *c, int channelnum, int reg, uint8_t val) {
   bus_write_8(c->channel[channelnum].base_port + reg, val);
@@ -169,6 +166,32 @@ static void ata_pio_read(struct ata_controller *c,
   }
 }
 
+static int hdc_isr(void *arg) {
+  struct ata_controller *c = arg;
+  struct ata_disk *disk = c->active_disk;
+  uint8_t status = read_altstatus(c, disk->channel);
+  if (status & ATA_STATUS_FLAG_DRQ) {
+    return INT_CONTINUE;
+  } else {
+    return 0;
+  }
+}
+
+static void hdc_ist(void *arg) {
+  struct ata_controller *c = arg;
+  struct ata_disk *disk = c->active_disk;
+  struct irp *irp = &c->irp;
+  uint8_t status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
+
+  if (status & ATA_STATUS_FLAG_ERROR) {
+    irp->error = 0x80000000 | ata_read(c, disk->channel, ATA_REG_ERR);
+  } else {
+    irp->error = 0;
+    ata_pio_read(c, disk->channel, irp->buf, irp->blksz * SECTOR_SIZE);
+  }
+  sched_wakeup(&irp->iocomp);
+}
+
 static void fixup_string_endianness(uint8_t *p, size_t size) {
   while (size > 0) {
     uint8_t tmp = p[1];
@@ -190,7 +213,7 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
   /* Send IDENTIFY command (0xEC). */
 
   ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0xA0 | (disk->slave << 4));
-  ata_wait(c, disk->channel);
+  ata_delay400(c, disk->channel);
 
   ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, 0);
   ata_write(c, disk->channel, ATA_REG_LBA_LOW, 0);
@@ -222,9 +245,19 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
   disk->lba_supported = ((disk->identification_space[100] & 2) != 0);
   disk->dma_supported = ((disk->identification_space[100] & 1) != 0);
   memcpy(&disk->sector_capacity, &disk->identification_space[114], sizeof(disk->sector_capacity));
-  memcpy(&disk->addressable_sector_count,
-	 &disk->identification_space[120],
-	 sizeof(disk->addressable_sector_count));
+
+  {
+    uint32_t lba28_count;
+    memcpy(&lba28_count, &disk->identification_space[120], sizeof(lba28_count));
+    if (lba28_count == 0x0fffffff) {
+      uint64_t lba48_count;
+      /* More than 28 bits' worth of sectors - read the lba48 area */
+      memcpy(&lba48_count, &disk->identification_space[200], sizeof(lba48_count));
+      disk->addressable_sector_count = lba48_count;
+    } else {
+      disk->addressable_sector_count = lba28_count;
+    }
+  }
 
   fixup_string_endianness(disk->serial_number, sizeof(disk->serial_number));
   fixup_string_endianness(disk->firmware_revision, sizeof(disk->firmware_revision));
@@ -234,9 +267,10 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
   printf(" - serial %.*s\n", sizeof(disk->serial_number), disk->serial_number);
   printf(" - firmware %.*s\n", sizeof(disk->firmware_revision), disk->firmware_revision);
   printf(" - model %.*s\n", sizeof(disk->model), disk->model);
-  printf(" - sector count %d (0x%x)\n",
-	 disk->addressable_sector_count,
-	 disk->addressable_sector_count);
+  printf(" - sector count %d (0x%08x%08x)\n",
+	 (uint32_t) disk->addressable_sector_count,
+	 (uint32_t) (disk->addressable_sector_count >> 32),
+	 (uint32_t) disk->addressable_sector_count);
 
   disk->valid = 1;
 
@@ -257,7 +291,6 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
 
   struct ata_controller *c;
   struct irp *irp;
-  device_t dev;
 
   /* According to the "PCI IDE Controller Specification Revision 1.0",
      which I retrieved from
@@ -413,9 +446,92 @@ static int hdd_close(device_t dev) {
   return 0;
 }
 
-static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blnko) {
+static void hdd_setup_io(struct ata_disk *disk, struct irp *irp) {
+  struct ata_controller *c = disk->controller;
+  uint64_t lba = irp->blkno; /* TODO: should be 64 bits in the irp? */
+
+  c->active_disk = disk;
+
+  /* Send READ SECTORS EXT command. */
+  ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
+  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, (irp->blksz >> 8) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_LOW, (lba >> 24) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 32) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 40) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, irp->blksz & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_LOW, lba & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 8) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 16) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_COMMAND_STATUS, 0x24);
+
+  /* We'll get an IRQ sometime. */
+}
+
+static int hdd_rw(struct ata_disk *disk, struct irp *irp, int cmd,
+		  uint8_t *buf, size_t block_count, int blkno)
+{
+  int err;
+
+  irp->cmd = cmd;
+  irp->ntries = 0;
+  irp->error = 0;
+  irp->blkno = blkno;
+  irp->blksz = block_count;
+  irp->buf = buf;
+
+  sched_lock();
+
+  hdd_setup_io(disk, irp);
+
+  if (sched_sleep(&irp->iocomp) == SLP_INTR) {
+    err = EINTR;
+  } else {
+    err = irp->error;
+  }
+  sched_unlock();
+
+  return err;
+}
+
+static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
   struct ata_disk *disk = get_disk(dev);
-  return EINVAL;
+  uint8_t *kbuf;
+  size_t sector_count = *nbyte / SECTOR_SIZE;
+  size_t transferred_total = 0;
+
+  if ((blkno < 0) || (blkno + sector_count >= disk->addressable_sector_count))
+    return EIO;
+
+  kbuf = kmem_map(buf, *nbyte);
+  if (kbuf == NULL)
+    return EFAULT;
+  /* TODO: could it be possible that noncontiguous physical pages are
+     backing this portion of virtual address space? The code here (and
+     in fdd.c, which it is based on) assumes not, I think... */
+
+  while (sector_count > 0) {
+    size_t transfer_sector_count =
+      (sector_count > BUFFER_LENGTH_IN_SECTORS) ? BUFFER_LENGTH_IN_SECTORS : sector_count;
+    size_t transfer_byte_count = SECTOR_SIZE * transfer_sector_count;
+    int err;
+
+    err = hdd_rw(disk, &disk->controller->irp, IO_READ,
+		 disk->controller->buffer, transfer_sector_count, blkno);
+    if (err) {
+      printf("HDD error: %d\n", err);
+      return EIO;
+    }
+
+    memcpy(kbuf, disk->controller->buffer, transfer_byte_count);
+
+    transferred_total += transfer_byte_count;
+    kbuf += transfer_byte_count;
+    blkno += transfer_sector_count;
+    sector_count -= transfer_sector_count;
+  }
+
+  *nbyte = transferred_total;
+  return 0;
 }
 
 static int hdd_write(device_t dev, char *buf, size_t *nbyte, int blkno) {
