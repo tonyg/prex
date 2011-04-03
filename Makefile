@@ -18,8 +18,11 @@ fd.img: all prexos
 image.iso: fd.img
 	genisoimage -b fd.img -o image.iso fd.img
 
+# We imagine that our 20M "disk" has 320 cylinders, 8 heads, and 16 sectors/cylinder.
+# We partition it into four partitions, roughly 5 MB each, all typed as FAT16.
 hd.raw:
 	qemu-img create $@ 20M
+	printf ",80,6\n,80,6\n,80,6\n,,6\n" | sfdisk -C 320 -H 8 -S 16 $@
 
 curses: fd.img hd.raw
 	qemu -curses -fda fd.img -hda hd.raw
