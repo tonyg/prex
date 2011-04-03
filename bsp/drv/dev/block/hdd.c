@@ -82,7 +82,6 @@ struct ata_disk {
   int channel;
   int slave; /* 0 => master, 1 => slave */
   uint8_t identification_space[512];
-  uint8_t *sector0;
 
   /* These fields are extracted from identification_space: */
   uint8_t serial_number[10];
@@ -248,6 +247,7 @@ static void hdd_setup_io(struct ata_disk *disk,
 
 static void setup_partitions(struct driver *self, struct ata_disk *disk) {
   struct ata_controller *c = disk->controller;
+  uint8_t *sector0;
 
   hdd_setup_io(disk, IO_READ, 0, 1);
   ata_wait(c, disk->channel);
@@ -258,10 +258,10 @@ static void setup_partitions(struct driver *self, struct ata_disk *disk) {
     return;
   }
 
-  disk->sector0 = kmem_alloc(SECTOR_SIZE);
-  ata_pio_read(c, disk->channel, disk->sector0, SECTOR_SIZE);
+  sector0 = kmem_alloc(SECTOR_SIZE);
+  ata_pio_read(c, disk->channel, sector0, SECTOR_SIZE);
 
-  if (0xaa55 == (* (uint16_t *) (&disk->sector0[SECTOR_SIZE - 2]))) {
+  if (0xaa55 == (* (uint16_t *) (&sector0[SECTOR_SIZE - 2]))) {
     int partition;
     /* Valid DOS disklabel? */
     for (partition = 0; partition < 4; partition++) {
@@ -272,14 +272,17 @@ static void setup_partitions(struct driver *self, struct ata_disk *disk) {
 	uint8_t end_chs[3];
 	uint32_t start_lba;
 	uint32_t sector_count;
-      } *p = (void *) (disk->sector0 + 0x1be + (partition * 16));
-      printf(" -- %sp%c, 0x%08x size 0x%08x\n",
+      } *p = (void *) (&sector0[0x1be + (partition * 16)]);
+      printf(" - partition %sp%c, type 0x%02x, 0x%08x size 0x%08x\n",
 	     disk->devname,
 	     '0' + partition,
+	     p->system_id,
 	     p->start_lba,
 	     p->sector_count);
     }
   }
+
+  kmem_free(sector0);
 }
 
 static void fixup_string_endianness(uint8_t *p, size_t size) {
@@ -299,7 +302,6 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
   disk->controller = c;
   disk->channel = disknum >> 1;
   disk->slave = disknum & 1;
-  disk->sector0 = NULL;
 
   /* Send IDENTIFY command (0xEC). */
 
