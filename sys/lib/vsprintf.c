@@ -92,6 +92,9 @@ vsprintf(char *buf, const char *fmt, va_list args)
 		width = -1;
 		if (isdigit(*fmt)) {
 			width = atoi(&fmt);
+		} else if (*fmt == '.' && fmt[1] == '*') {
+			width = va_arg(args, int);
+			fmt += 2;
 		}
 		/* ignore long */
 		if (*fmt == 'l')
