@@ -10,12 +10,13 @@
 struct pci_device pci_devices[PCI_DEVICE_LIMIT];
 size_t pci_device_count = 0;
 
-static uint32_t addr_for(int bus, int dev, int fn, int offset) {
-  return 0x80000000
+static void addr_for(int bus, int dev, int fn, int offset, uint32_t *addr, uint32_t *dataport) {
+  *addr = 0x80000000
     | ((bus & 0xff) << 16)
     | ((dev & 0x1f) << 11)
     | ((fn & 0x7) << 8)
     | (offset & 0xfc);
+  *dataport = CONFIG_DATA + (offset & 0x03);
 }
 
 /*
@@ -30,60 +31,68 @@ static uint32_t addr_for(int bus, int dev, int fn, int offset) {
  * Everything is little-endian, remember, so offset 2 gets you the
  * upper halfword of a 32-bit value.
  */
-static uint32_t read_pci_raw(int bus, int dev, int fn, int offset, int width_bits) {
-  uint32_t addr = addr_for(bus, dev, fn, offset);
-  uint32_t result;
+static uint32_t read_pci_raw(int bus, int dev, int fn, int offset, int width) {
+  uint32_t addr, dataport;
+
+  addr_for(bus, dev, fn, offset, &addr, &dataport);
 
   bus_write_32(CONFIG_ADDRESS, addr);
-  result = bus_read_32(CONFIG_DATA);
-  result = result >> ((offset & 2) * 8);
-  result = result & ~(- (1 << width_bits));
-  return result;
+  switch (width) {
+    case 4:
+      return bus_read_32(dataport);
+    case 2:
+      return bus_read_16(dataport);
+    case 1:
+      return bus_read_8(dataport);
+    default:
+      panic("read_pci_raw doesn't accept non 8/16/32 widths.");
+      return 0xffffffff;
+  }
 }
 
 uint32_t read_pci32(int bus, int dev, int fn, int offset) {
-  return read_pci_raw(bus, dev, fn, offset, 32);
+  return read_pci_raw(bus, dev, fn, offset, 4);
 }
 
 uint16_t read_pci16(int bus, int dev, int fn, int offset) {
-  return (uint16_t) read_pci_raw(bus, dev, fn, offset, 16);
+  return (uint16_t) read_pci_raw(bus, dev, fn, offset, 2);
 }
 
 uint8_t read_pci8(int bus, int dev, int fn, int offset) {
-  return (uint8_t) read_pci_raw(bus, dev, fn, offset, 8);
+  return (uint8_t) read_pci_raw(bus, dev, fn, offset, 1);
 }
 
-static void write_pci_raw(int bus, int dev, int fn, int offset, int width_bits, int val) {
-  uint32_t addr = addr_for(bus, dev, fn, offset);
+static void write_pci_raw(int bus, int dev, int fn, int offset, int width, int val) {
+  uint32_t addr, dataport;
 
-  /* TODO: figure out whether (and if so, how) to shift and mask val
-     to write to the right subregister. Stupid x86 I/O space. */
+  addr_for(bus, dev, fn, offset, &addr, &dataport);
+
   bus_write_32(CONFIG_ADDRESS, addr);
-  switch (width_bits) {
-    case 32:
-      bus_write_32(CONFIG_DATA, val);
+  switch (width) {
+    case 4:
+      bus_write_32(dataport, val);
       break;
-    case 16:
-      bus_write_16(CONFIG_DATA, val);
+    case 2:
+      bus_write_16(dataport, val);
       break;
-    case 8:
-      bus_write_8(CONFIG_DATA, val);
+    case 1:
+      bus_write_8(dataport, val);
       break;
     default:
-      panic("Dude write_pci_raw doesn't accept non 8/16/32 widths.\n");
+      panic("write_pci_raw doesn't accept non 8/16/32 widths.");
   }
 }
 
 void write_pci32(int bus, int dev, int fn, int offset, uint32_t val) {
-  write_pci_raw(bus, dev, fn, offset, 32, val);
+  write_pci_raw(bus, dev, fn, offset, 4, val);
 }
 
 void write_pci16(int bus, int dev, int fn, int offset, uint16_t val) {
-  write_pci_raw(bus, dev, fn, offset, 16, val);
+  write_pci_raw(bus, dev, fn, offset, 2, val);
 }
 
 void write_pci8(int bus, int dev, int fn, int offset, uint8_t val) {
-  write_pci_raw(bus, dev, fn, offset, 8, val);
+  write_pci_raw(bus, dev, fn, offset, 1, val);
 }
 
 uint8_t read_pci_interrupt_line(int bus, int dev) {
@@ -127,8 +136,8 @@ static void probe_pci(void) {
       v->bist = read_pci8(bus, dev, 0, PCI_REGISTER_BIST);
 
       if ((v->header_type & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_GENERAL) {
-	v->subsystem_vendor_id = read_pci8(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_VENDOR_ID);
-	v->subsystem_id = read_pci8(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_ID);
+	v->subsystem_vendor_id = read_pci16(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_VENDOR_ID);
+	v->subsystem_id = read_pci16(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_ID);
       } else {
 	v->subsystem_vendor_id = 0xffff;
 	v->subsystem_id = 0xffff;
