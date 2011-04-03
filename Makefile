@@ -25,10 +25,10 @@ hd.raw:
 	printf ",80,6\n,80,6\n,80,6\n,,6\n" | sfdisk -C 320 -H 8 -S 16 $@
 
 curses: fd.img hd.raw
-	qemu -curses -fda fd.img -hda hd.raw
+	qemu -boot order=adc -curses -fda fd.img -hda hd.raw
 
 run: fd.img hd.raw
-	qemu -fda fd.img -hda hd.raw
+	qemu -boot order=adc -fda fd.img -hda hd.raw
 
 debug: fd.img
-	qemu -s -S -fda fd.img -hda hd.raw
+	qemu -boot order=adc -s -S -fda fd.img -hda hd.raw
