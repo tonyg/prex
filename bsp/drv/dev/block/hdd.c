@@ -242,24 +242,35 @@ static void hdd_setup_io(struct ata_disk *disk,
   ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 16) & 0xff);
   ata_write(c, disk->channel, ATA_REG_COMMAND_STATUS, final_cmd);
 
-  /* We'll get an IRQ sometime. */
+  /* We'll get an interrupt sometime, if interrupts aren't disabled;
+     otherwise, we'll need to check the status register by polling. */
+}
+
+/* Useful only from within the kernel, while we're probing and setting
+   everything up. */
+static int read_during_setup(struct ata_disk *disk, uint64_t lba, uint8_t *buf, size_t count) {
+  struct ata_controller *c = disk->controller;
+  hdd_setup_io(disk, IO_READ, lba, count);
+  ata_wait(c, disk->channel);
+  if (ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS) & ATA_STATUS_FLAG_ERROR) {
+    printf("Couldn't read_during_setup %s (lba %d, count %d): 0x%02x\n",
+	   disk->devname,
+	   lba, count,
+	   ata_read(c, disk->channel, ATA_REG_ERR));
+    return EIO;
+  }
+
+  ata_pio_read(c, disk->channel, buf, count * SECTOR_SIZE);
+  return 0;
 }
 
 static void setup_partitions(struct driver *self, struct ata_disk *disk) {
-  struct ata_controller *c = disk->controller;
-  uint8_t *sector0;
+  uint8_t *sector0 = kmem_alloc(SECTOR_SIZE);
 
-  hdd_setup_io(disk, IO_READ, 0, 1);
-  ata_wait(c, disk->channel);
-  if (ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS) & ATA_STATUS_FLAG_ERROR) {
-    printf("Couldn't read %s partition table: 0x%02x\n",
-	   disk->devname,
-	   ata_read(c, disk->channel, ATA_REG_ERR));
+  if (read_during_setup(disk, 0, sector0, 1)) {
+    kmem_free(sector0);
     return;
   }
-
-  sector0 = kmem_alloc(SECTOR_SIZE);
-  ata_pio_read(c, disk->channel, sector0, SECTOR_SIZE);
 
   if (0xaa55 == (* (uint16_t *) (&sector0[SECTOR_SIZE - 2]))) {
     int partition;
