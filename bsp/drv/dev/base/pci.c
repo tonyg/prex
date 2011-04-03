@@ -5,7 +5,7 @@
 #define CONFIG_ADDRESS	0xcf8
 #define CONFIG_DATA	0xcfc
 
-#define PCI_DEVICE_LIMIT	32
+#define PCI_DEVICE_LIMIT	32 * 8
 
 struct pci_device pci_devices[PCI_DEVICE_LIMIT];
 size_t pci_device_count = 0;
@@ -116,39 +116,45 @@ void write_pci_bar(int bus, int dev, int bar_number, uint32_t val) {
 static void probe_pci(void) {
   int bus = 0; /* for now */
   int dev;
+  int fn;
 
   for (dev = 0; dev < 32; dev++) {
-    struct pci_device *v = &pci_devices[dev];
-    v->bus = bus;
-    v->slot = dev;
+    for (fn = 0; fn < 8; fn++) {
+      int device_record_index = (dev << 3) | fn;
+      struct pci_device *v = &pci_devices[device_record_index];
+      v->bus = bus;
+      v->slot = dev;
+      v->function = fn;
 
-    v->vendor_id = read_pci16(bus, dev, 0, PCI_REGISTER_VENDOR_ID);
-    if (v->vendor_id != 0xffff) { /* all-ones is PCI's way of saying "what register?" */
-      pci_device_count = dev + 1;
-      v->device_id = read_pci16(bus, dev, 0, PCI_REGISTER_DEVICE_ID);
-      v->revision_id = read_pci8(bus, dev, 0, PCI_REGISTER_REVISION_ID);
-      v->prog_if = read_pci8(bus, dev, 0, PCI_REGISTER_PROG_IF);
-      v->subclass = read_pci8(bus, dev, 0, PCI_REGISTER_SUBCLASS);
-      v->class_code = read_pci8(bus, dev, 0, PCI_REGISTER_CLASS_CODE);
-      v->cache_line_size = read_pci8(bus, dev, 0, PCI_REGISTER_CACHE_LINE_SIZE);
-      v->latency_timer = read_pci8(bus, dev, 0, PCI_REGISTER_LATENCY_TIMER);
-      v->header_type = read_pci8(bus, dev, 0, PCI_REGISTER_HEADER_TYPE);
-      v->bist = read_pci8(bus, dev, 0, PCI_REGISTER_BIST);
+      v->vendor_id = read_pci16(bus, dev, fn, PCI_REGISTER_VENDOR_ID);
+      if (v->vendor_id != 0xffff) { /* all-ones is PCI's way of saying "what register?" */
+	pci_device_count = device_record_index + 1;
+	v->device_id = read_pci16(bus, dev, fn, PCI_REGISTER_DEVICE_ID);
+	v->revision_id = read_pci8(bus, dev, fn, PCI_REGISTER_REVISION_ID);
+	v->prog_if = read_pci8(bus, dev, fn, PCI_REGISTER_PROG_IF);
+	v->subclass = read_pci8(bus, dev, fn, PCI_REGISTER_SUBCLASS);
+	v->class_code = read_pci8(bus, dev, fn, PCI_REGISTER_CLASS_CODE);
+	v->cache_line_size = read_pci8(bus, dev, fn, PCI_REGISTER_CACHE_LINE_SIZE);
+	v->latency_timer = read_pci8(bus, dev, fn, PCI_REGISTER_LATENCY_TIMER);
+	v->header_type = read_pci8(bus, dev, fn, PCI_REGISTER_HEADER_TYPE);
+	v->bist = read_pci8(bus, dev, fn, PCI_REGISTER_BIST);
 
-      if ((v->header_type & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_GENERAL) {
-	v->subsystem_vendor_id = read_pci16(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_VENDOR_ID);
-	v->subsystem_id = read_pci16(bus, dev, 0, PCI_REGISTER_SUBSYSTEM_ID);
-      } else {
-	v->subsystem_vendor_id = 0xffff;
-	v->subsystem_id = 0xffff;
+	if ((v->header_type & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_GENERAL) {
+	  v->subsystem_vendor_id = read_pci16(bus, dev, fn, PCI_REGISTER_SUBSYSTEM_VENDOR_ID);
+	  v->subsystem_id = read_pci16(bus, dev, fn, PCI_REGISTER_SUBSYSTEM_ID);
+	} else {
+	  v->subsystem_vendor_id = 0xffff;
+	  v->subsystem_id = 0xffff;
+	}
+
+	printf("PCI #%02x.%d htype=%02X %04X:%04X/%04X:%04X class=%02X:%02X rev=%02X progIF=%02X\n",
+	       dev, fn,
+	       v->header_type,
+	       v->vendor_id, v->device_id,
+	       v->subsystem_vendor_id, v->subsystem_id,
+	       v->class_code, v->subclass,
+	       v->revision_id, v->prog_if);
       }
-
-      printf("PCI #%02x %04X:%04X/%04X:%04X class=%02X:%02X rev=%02X progIF=%02X\n",
-	     dev,
-	     v->vendor_id, v->device_id,
-	     v->subsystem_vendor_id, v->subsystem_id,
-	     v->class_code, v->subclass,
-	     v->revision_id, v->prog_if);
     }
   }
 }

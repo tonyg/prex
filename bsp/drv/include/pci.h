@@ -68,6 +68,7 @@ typedef enum pci_register_offset_t_ {
 struct pci_device {
   int bus;
   int slot;
+  int function;
 
   uint16_t vendor_id;
   uint16_t device_id;
