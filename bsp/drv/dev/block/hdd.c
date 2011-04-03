@@ -82,6 +82,7 @@ struct ata_disk {
   int channel;
   int slave; /* 0 => master, 1 => slave */
   uint8_t identification_space[512];
+  uint8_t *sector0;
 
   /* These fields are extracted from identification_space: */
   uint8_t serial_number[10];
@@ -183,13 +184,102 @@ static void hdc_ist(void *arg) {
   struct irp *irp = &c->irp;
   uint8_t status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
 
+  c->active_disk = NULL;
+
   if (status & ATA_STATUS_FLAG_ERROR) {
     irp->error = 0x80000000 | ata_read(c, disk->channel, ATA_REG_ERR);
-  } else {
-    irp->error = 0;
-    ata_pio_read(c, disk->channel, irp->buf, irp->blksz * SECTOR_SIZE);
+    sched_wakeup(&irp->iocomp);
+    return;
+  }
+
+  irp->error = 0;
+  switch (irp->cmd) {
+    case IO_READ:
+      ata_pio_read(c, disk->channel, irp->buf, irp->blksz * SECTOR_SIZE);
+      break;
+    case IO_WRITE:
+      panic("hdd_ist IO_WRITE not implemented"); /* TODO */
+      /* TODO: add flush-to-disk ioctl? */
+      break;
+    default:
+      panic("hdd_ist invalid irp->cmd");
+      break;
   }
   sched_wakeup(&irp->iocomp);
+}
+
+static void hdd_setup_io(struct ata_disk *disk,
+			 int cmd,
+			 uint64_t lba,
+			 size_t sector_count)
+{
+  struct ata_controller *c = disk->controller;
+  uint8_t final_cmd;
+
+  c->active_disk = disk;
+
+  switch (cmd) {
+    case IO_READ:
+      /* Send READ SECTORS EXT command. */
+      ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
+      final_cmd = 0x24;
+      break;
+    case IO_WRITE:
+      panic("hdd_setup_io IO_WRITE not implemented"); /* TODO */
+      final_cmd = 0; /* TODO */
+      break;
+    default:
+      panic("hdd_setup_io invalid cmd");
+      return;
+  }
+
+  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, (sector_count >> 8) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_LOW, (lba >> 24) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 32) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 40) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, sector_count & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_LOW, lba & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 8) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 16) & 0xff);
+  ata_write(c, disk->channel, ATA_REG_COMMAND_STATUS, final_cmd);
+
+  /* We'll get an IRQ sometime. */
+}
+
+static void setup_partitions(struct driver *self, struct ata_disk *disk) {
+  struct ata_controller *c = disk->controller;
+
+  hdd_setup_io(disk, IO_READ, 0, 1);
+  ata_wait(c, disk->channel);
+  if (ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS) & ATA_STATUS_FLAG_ERROR) {
+    printf("Couldn't read %s partition table: 0x%02x\n",
+	   disk->devname,
+	   ata_read(c, disk->channel, ATA_REG_ERR));
+    return;
+  }
+
+  disk->sector0 = kmem_alloc(SECTOR_SIZE);
+  ata_pio_read(c, disk->channel, disk->sector0, SECTOR_SIZE);
+
+  if (0xaa55 == (* (uint16_t *) (&disk->sector0[SECTOR_SIZE - 2]))) {
+    int partition;
+    /* Valid DOS disklabel? */
+    for (partition = 0; partition < 4; partition++) {
+      struct {
+	uint8_t flags;
+	uint8_t start_chs[3];
+	uint8_t system_id;
+	uint8_t end_chs[3];
+	uint32_t start_lba;
+	uint32_t sector_count;
+      } *p = (void *) (disk->sector0 + 0x1be + (partition * 16));
+      printf(" -- %sp%c, 0x%08x size 0x%08x\n",
+	     disk->devname,
+	     '0' + partition,
+	     p->start_lba,
+	     p->sector_count);
+    }
+  }
 }
 
 static void fixup_string_endianness(uint8_t *p, size_t size) {
@@ -209,6 +299,7 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
   disk->controller = c;
   disk->channel = disknum >> 1;
   disk->slave = disknum & 1;
+  disk->sector0 = NULL;
 
   /* Send IDENTIFY command (0xEC). */
 
@@ -281,6 +372,8 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
   disk->devname[5] = '\0';
   disk->dev = device_create(self, disk->devname, D_BLK | D_PROT);
   *((struct ata_disk **) device_private(disk->dev)) = disk;
+
+  setup_partitions(self, disk);
 }
 
 static void setup_controller(struct driver *self, struct pci_device *v) {
@@ -446,27 +539,6 @@ static int hdd_close(device_t dev) {
   return 0;
 }
 
-static void hdd_setup_io(struct ata_disk *disk, struct irp *irp) {
-  struct ata_controller *c = disk->controller;
-  uint64_t lba = irp->blkno; /* TODO: should be 64 bits in the irp? */
-
-  c->active_disk = disk;
-
-  /* Send READ SECTORS EXT command. */
-  ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
-  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, (irp->blksz >> 8) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_LOW, (lba >> 24) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 32) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 40) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, irp->blksz & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_LOW, lba & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 8) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 16) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_COMMAND_STATUS, 0x24);
-
-  /* We'll get an IRQ sometime. */
-}
-
 static int hdd_rw(struct ata_disk *disk, struct irp *irp, int cmd,
 		  uint8_t *buf, size_t block_count, int blkno)
 {
@@ -481,7 +553,7 @@ static int hdd_rw(struct ata_disk *disk, struct irp *irp, int cmd,
 
   sched_lock();
 
-  hdd_setup_io(disk, irp);
+  hdd_setup_io(disk, irp->cmd, irp->blkno, irp->blksz); /* TODO: 64 bit irp->blkno? */
 
   if (sched_sleep(&irp->iocomp) == SLP_INTR) {
     err = EINTR;
