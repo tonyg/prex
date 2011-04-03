@@ -24,8 +24,7 @@
 struct hdd_softc {
   device_t dev;
   char devname[4]; /* TODO: 4 is a magic number */
-  int pci_bus;
-  int pci_slot;
+  struct pci_device *pci_dev;
   int isopen; /* FIXME: do we care? */
   struct irp irp;
   irq_t irq;
@@ -52,8 +51,8 @@ static void setup_device(struct driver *self, struct pci_device *v) {
 
   /* Try setting the IRQ line to something stupid: 0xfe. If it takes
      it, it's an IRQ-configurable device. */
-  write_pci_interrupt_line(v->bus, v->slot, 0xfe);
-  if (read_pci_interrupt_line(v->bus, v->slot) != 0xfe) {
+  write_pci_interrupt_line(v, 0xfe);
+  if (read_pci_interrupt_line(v) != 0xfe) {
     /* Nope. Legacy horror. Punt? */
     printf("Not trying to cope with legacy hardware at the moment\n");
     return;
@@ -72,19 +71,18 @@ static void setup_device(struct driver *self, struct pci_device *v) {
     dev = device_create(self, n, D_BLK | D_PROT);
   }
 
-  printf("device %d.%d = %s\n", v->bus, v->slot, devname_tmp);
+  printf("device %d.%d.%d = %s\n", v->bus, v->slot, v->function, devname_tmp);
   {
     int i;
     for (i = 0; i < N_PCI_BASE_ADDRESS_REGISTERS; i++) {
-      printf(" - bar %d = 0x%08X\n", i, read_pci_bar(v->bus, v->slot, i));
+      printf(" - bar %d = 0x%08X\n", i, read_pci_bar(v, i));
     }
   }
 
   sc = device_private(dev);
   sc->dev = dev;
   memcpy(&sc->devname[0], &devname_tmp[0], sizeof(devname_tmp));
-  sc->pci_bus = v->bus;
-  sc->pci_slot = v->slot;
+  sc->pci_dev = v;
   sc->isopen = 0;
 
   irp = &sc->irp;
@@ -95,7 +93,7 @@ static void setup_device(struct driver *self, struct pci_device *v) {
   sc->irq = irq_attach(HDC_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, sc);
 
   /* Tell the controller which IRQ to use, for real this time. */
-  write_pci_interrupt_line(v->bus, v->slot, HDC_IRQ);
+  write_pci_interrupt_line(v, HDC_IRQ);
 
   sc->buffer = page_alloc(BUFFER_LENGTH);
 }

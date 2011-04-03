@@ -88,18 +88,18 @@ struct pci_device {
 extern struct pci_device pci_devices[];
 extern size_t pci_device_count; /* used slots - some may have vendor 0xffff meaning invalid */
 
-extern uint32_t read_pci32(int bus, int dev, int fn, int offset);
-extern uint16_t read_pci16(int bus, int dev, int fn, int offset);
-extern uint8_t read_pci8(int bus, int dev, int fn, int offset);
+extern uint32_t read_pci32(struct pci_device *v, int offset);
+extern uint16_t read_pci16(struct pci_device *v, int offset);
+extern uint8_t read_pci8(struct pci_device *v, int offset);
 
-extern void write_pci32(int bus, int dev, int fn, int offset, uint32_t val);
-extern void write_pci16(int bus, int dev, int fn, int offset, uint16_t val);
-extern void write_pci8(int bus, int dev, int fn, int offset, uint8_t val);
+extern void write_pci32(struct pci_device *v, int offset, uint32_t val);
+extern void write_pci16(struct pci_device *v, int offset, uint16_t val);
+extern void write_pci8(struct pci_device *v, int offset, uint8_t val);
 
-extern uint8_t read_pci_interrupt_line(int bus, int dev);
-extern uint32_t read_pci_bar(int bus, int dev, int bar_number);
+extern uint8_t read_pci_interrupt_line(struct pci_device *v);
+extern uint32_t read_pci_bar(struct pci_device *v, int bar_number);
 
-extern void write_pci_interrupt_line(int bus, int dev, int irqno);
-extern void write_pci_bar(int bus, int dev, int bar_number, uint32_t val);
+extern void write_pci_interrupt_line(struct pci_device *v, int irqno);
+extern void write_pci_bar(struct pci_device *v, int bar_number, uint32_t val);
 
 #endif

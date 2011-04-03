@@ -50,16 +50,16 @@ static uint32_t read_pci_raw(int bus, int dev, int fn, int offset, int width) {
   }
 }
 
-uint32_t read_pci32(int bus, int dev, int fn, int offset) {
-  return read_pci_raw(bus, dev, fn, offset, 4);
+uint32_t read_pci32(struct pci_device *v, int offset) {
+  return read_pci_raw(v->bus, v->slot, v->function, offset, 4);
 }
 
-uint16_t read_pci16(int bus, int dev, int fn, int offset) {
-  return (uint16_t) read_pci_raw(bus, dev, fn, offset, 2);
+uint16_t read_pci16(struct pci_device *v, int offset) {
+  return (uint16_t) read_pci_raw(v->bus, v->slot, v->function, offset, 2);
 }
 
-uint8_t read_pci8(int bus, int dev, int fn, int offset) {
-  return (uint8_t) read_pci_raw(bus, dev, fn, offset, 1);
+uint8_t read_pci8(struct pci_device *v, int offset) {
+  return (uint8_t) read_pci_raw(v->bus, v->slot, v->function, offset, 1);
 }
 
 static void write_pci_raw(int bus, int dev, int fn, int offset, int width, int val) {
@@ -83,34 +83,34 @@ static void write_pci_raw(int bus, int dev, int fn, int offset, int width, int v
   }
 }
 
-void write_pci32(int bus, int dev, int fn, int offset, uint32_t val) {
-  write_pci_raw(bus, dev, fn, offset, 4, val);
+void write_pci32(struct pci_device *v, int offset, uint32_t val) {
+  write_pci_raw(v->bus, v->slot, v->function, offset, 4, val);
 }
 
-void write_pci16(int bus, int dev, int fn, int offset, uint16_t val) {
-  write_pci_raw(bus, dev, fn, offset, 2, val);
+void write_pci16(struct pci_device *v, int offset, uint16_t val) {
+  write_pci_raw(v->bus, v->slot, v->function, offset, 2, val);
 }
 
-void write_pci8(int bus, int dev, int fn, int offset, uint8_t val) {
-  write_pci_raw(bus, dev, fn, offset, 1, val);
+void write_pci8(struct pci_device *v, int offset, uint8_t val) {
+  write_pci_raw(v->bus, v->slot, v->function, offset, 1, val);
 }
 
-uint8_t read_pci_interrupt_line(int bus, int dev) {
-  return read_pci8(bus, dev, 0, PCI_REGISTER_INTERRUPT_LINE);
+uint8_t read_pci_interrupt_line(struct pci_device *v) {
+  return read_pci8(v, PCI_REGISTER_INTERRUPT_LINE);
 }
 
-void write_pci_interrupt_line(int bus, int dev, int irqno) {
-  write_pci8(bus, dev, 0, PCI_REGISTER_INTERRUPT_LINE, irqno);
+void write_pci_interrupt_line(struct pci_device *v, int irqno) {
+  write_pci8(v, PCI_REGISTER_INTERRUPT_LINE, irqno);
 }
 
-uint32_t read_pci_bar(int bus, int dev, int bar_number) {
+uint32_t read_pci_bar(struct pci_device *v, int bar_number) {
   ASSERT(bar_number >= 0 && bar_number < N_PCI_BASE_ADDRESS_REGISTERS);
-  return read_pci32(bus, dev, 0, PCI_REGISTER_BAR0 + bar_number * 4);
+  return read_pci32(v, PCI_REGISTER_BAR0 + bar_number * 4);
 }
 
-void write_pci_bar(int bus, int dev, int bar_number, uint32_t val) {
+void write_pci_bar(struct pci_device *v, int bar_number, uint32_t val) {
   ASSERT(bar_number >= 0 && bar_number < N_PCI_BASE_ADDRESS_REGISTERS);
-  write_pci32(bus, dev, 0, PCI_REGISTER_BAR0 + bar_number * 4, val);
+  write_pci32(v, PCI_REGISTER_BAR0 + bar_number * 4, val);
 }
 
 static void probe_pci(void) {
@@ -126,34 +126,35 @@ static void probe_pci(void) {
       v->slot = dev;
       v->function = fn;
 
-      v->vendor_id = read_pci16(bus, dev, fn, PCI_REGISTER_VENDOR_ID);
+      v->vendor_id = read_pci16(v, PCI_REGISTER_VENDOR_ID);
       if (v->vendor_id != 0xffff) { /* all-ones is PCI's way of saying "what register?" */
 	pci_device_count = device_record_index + 1;
-	v->device_id = read_pci16(bus, dev, fn, PCI_REGISTER_DEVICE_ID);
-	v->revision_id = read_pci8(bus, dev, fn, PCI_REGISTER_REVISION_ID);
-	v->prog_if = read_pci8(bus, dev, fn, PCI_REGISTER_PROG_IF);
-	v->subclass = read_pci8(bus, dev, fn, PCI_REGISTER_SUBCLASS);
-	v->class_code = read_pci8(bus, dev, fn, PCI_REGISTER_CLASS_CODE);
-	v->cache_line_size = read_pci8(bus, dev, fn, PCI_REGISTER_CACHE_LINE_SIZE);
-	v->latency_timer = read_pci8(bus, dev, fn, PCI_REGISTER_LATENCY_TIMER);
-	v->header_type = read_pci8(bus, dev, fn, PCI_REGISTER_HEADER_TYPE);
-	v->bist = read_pci8(bus, dev, fn, PCI_REGISTER_BIST);
+	v->device_id = read_pci16(v, PCI_REGISTER_DEVICE_ID);
+	v->revision_id = read_pci8(v, PCI_REGISTER_REVISION_ID);
+	v->prog_if = read_pci8(v, PCI_REGISTER_PROG_IF);
+	v->subclass = read_pci8(v, PCI_REGISTER_SUBCLASS);
+	v->class_code = read_pci8(v, PCI_REGISTER_CLASS_CODE);
+	v->cache_line_size = read_pci8(v, PCI_REGISTER_CACHE_LINE_SIZE);
+	v->latency_timer = read_pci8(v, PCI_REGISTER_LATENCY_TIMER);
+	v->header_type = read_pci8(v, PCI_REGISTER_HEADER_TYPE);
+	v->bist = read_pci8(v, PCI_REGISTER_BIST);
 
 	if ((v->header_type & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_GENERAL) {
-	  v->subsystem_vendor_id = read_pci16(bus, dev, fn, PCI_REGISTER_SUBSYSTEM_VENDOR_ID);
-	  v->subsystem_id = read_pci16(bus, dev, fn, PCI_REGISTER_SUBSYSTEM_ID);
+	  v->subsystem_vendor_id = read_pci16(v, PCI_REGISTER_SUBSYSTEM_VENDOR_ID);
+	  v->subsystem_id = read_pci16(v, PCI_REGISTER_SUBSYSTEM_ID);
 	} else {
 	  v->subsystem_vendor_id = 0xffff;
 	  v->subsystem_id = 0xffff;
 	}
 
-	printf("PCI #%02x.%d htype=%02X %04X:%04X/%04X:%04X class=%02X:%02X rev=%02X progIF=%02X\n",
+	printf("PCI #%02x.%d htype=%02X %04X:%04X/%04X:%04X class=%02X:%02X:%02X rev=%02X irq=%02X\n",
 	       dev, fn,
 	       v->header_type,
 	       v->vendor_id, v->device_id,
 	       v->subsystem_vendor_id, v->subsystem_id,
-	       v->class_code, v->subclass,
-	       v->revision_id, v->prog_if);
+	       v->class_code, v->subclass, v->prog_if,
+	       v->revision_id,
+	       read_pci8(v, PCI_REGISTER_INTERRUPT_LINE));
       }
     }
   }
