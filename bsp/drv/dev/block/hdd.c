@@ -72,6 +72,7 @@ struct ata_channel {
 
 struct ata_disk {
   int valid;
+  struct ata_controller *controller;
   int channel;
   int slave; /* 0 => master, 1 => slave */
   uint8_t identification_space[512];
@@ -84,11 +85,13 @@ struct ata_disk {
   int dma_supported;
   uint32_t sector_capacity;
   uint32_t addressable_sector_count;
+
+  char devname[6]; /* "hdXdX\0" TODO: fix magic number */
+  device_t dev; /* the PREX device */
 };
 
-struct hdd_softc {
-  device_t dev;
-  char devname[4]; /* TODO: 4 is a magic number */
+struct ata_controller {
+  char devname[4]; /* "hdX\0" TODO: fix magic number */
   struct pci_device *pci_dev;
   int isopen; /* FIXME: do we care? */
   struct irp irp;
@@ -99,47 +102,47 @@ struct hdd_softc {
 };
 
 static int hdc_isr(void *arg) {
-  struct hdd_softc *sc = arg;
+  struct ata_controller *c = arg;
   DPRINTF(("hdc_isr\n"));
 }
 
 static void hdc_ist(void *arg) {
-  struct hdd_softc *sc = arg;
+  struct ata_controller *c = arg;
   DPRINTF(("hdc_ist\n"));
 }
 
-static void ata_write(struct hdd_softc *sc, int channelnum, int reg, uint8_t val) {
-  bus_write_8(sc->channel[channelnum].base_port + reg, val);
+static void ata_write(struct ata_controller *c, int channelnum, int reg, uint8_t val) {
+  bus_write_8(c->channel[channelnum].base_port + reg, val);
 }
 
-static uint8_t ata_read(struct hdd_softc *sc, int channelnum, int reg) {
-  return bus_read_8(sc->channel[channelnum].base_port + reg);
+static uint8_t ata_read(struct ata_controller *c, int channelnum, int reg) {
+  return bus_read_8(c->channel[channelnum].base_port + reg);
 }
 
-static void write_control(struct hdd_softc *sc, int channelnum, uint8_t val) {
-  bus_write_8(sc->channel[channelnum].control_port, val);
+static void write_control(struct ata_controller *c, int channelnum, uint8_t val) {
+  bus_write_8(c->channel[channelnum].control_port, val);
 }
 
-static uint8_t read_altstatus(struct hdd_softc *sc, int channelnum) {
-  return bus_read_8(sc->channel[channelnum].control_port);
+static uint8_t read_altstatus(struct ata_controller *c, int channelnum) {
+  return bus_read_8(c->channel[channelnum].control_port);
 }
 
 /* A 400ns delay, used to wait for the device to start processing a
  * sent command and assert busy. */
-static void ata_delay400(struct hdd_softc *sc, int channelnum) {
-  read_altstatus(sc, channelnum);
-  read_altstatus(sc, channelnum);
-  read_altstatus(sc, channelnum);
-  read_altstatus(sc, channelnum);
+static void ata_delay400(struct ata_controller *c, int channelnum) {
+  read_altstatus(c, channelnum);
+  read_altstatus(c, channelnum);
+  read_altstatus(c, channelnum);
+  read_altstatus(c, channelnum);
 }
 
-static void ata_wait(struct hdd_softc *sc, int channelnum) {
+static void ata_wait(struct ata_controller *c, int channelnum) {
   unsigned int i;
 
-  ata_delay400(sc, channelnum);
+  ata_delay400(c, channelnum);
 
   for (i = 0; i < 0x80000000; i++) {
-    if (!(read_altstatus(sc, channelnum) & ATA_STATUS_FLAG_BUSY)) {
+    if (!(read_altstatus(c, channelnum) & ATA_STATUS_FLAG_BUSY)) {
       return;
     }
   }
@@ -149,10 +152,14 @@ static void ata_wait(struct hdd_softc *sc, int channelnum) {
      in-progress operations. */
 }
 
-static void ata_pio_read(struct hdd_softc *sc, int channelnum, uint8_t *buffer, size_t count) {
+static void ata_pio_read(struct ata_controller *c,
+			 int channelnum,
+			 uint8_t *buffer,
+			 size_t count)
+{
   ASSERT((count & 3) == 0); /* multiple of 4 bytes. */
   while (count > 0) {
-    uint32_t v = bus_read_32(sc->channel[channelnum].base_port + ATA_REG_DATA);
+    uint32_t v = bus_read_32(c->channel[channelnum].base_port + ATA_REG_DATA);
     buffer[0] = v & 0xff;
     buffer[1] = (v >> 8) & 0xff;
     buffer[2] = (v >> 16) & 0xff;
@@ -172,33 +179,34 @@ static void fixup_string_endianness(uint8_t *p, size_t size) {
   }
 }
 
-static void setup_disk(struct hdd_softc *sc, int disknum) {
-  struct ata_disk *disk = &sc->disk[disknum];
+static void setup_disk(struct driver *self, struct ata_controller *c, int disknum) {
+  struct ata_disk *disk = &c->disk[disknum];
 
   disk->valid = 0; /* to be determined properly below */
+  disk->controller = c;
   disk->channel = disknum >> 1;
   disk->slave = disknum & 1;
 
   /* Send IDENTIFY command (0xEC). */
 
-  ata_write(sc, disk->channel, ATA_REG_DISK_SELECT, 0xA0 | (disk->slave << 4));
-  ata_wait(sc, disk->channel);
+  ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0xA0 | (disk->slave << 4));
+  ata_wait(c, disk->channel);
 
-  ata_write(sc, disk->channel, ATA_REG_SECTOR_COUNT, 0);
-  ata_write(sc, disk->channel, ATA_REG_LBA_LOW, 0);
-  ata_write(sc, disk->channel, ATA_REG_LBA_MID, 0);
-  ata_write(sc, disk->channel, ATA_REG_LBA_HIGH, 0);
+  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, 0);
+  ata_write(c, disk->channel, ATA_REG_LBA_LOW, 0);
+  ata_write(c, disk->channel, ATA_REG_LBA_MID, 0);
+  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, 0);
 
-  ata_write(sc, disk->channel, ATA_REG_COMMAND_STATUS, 0xEC);
-  ata_delay400(sc, disk->channel);
+  ata_write(c, disk->channel, ATA_REG_COMMAND_STATUS, 0xEC);
+  ata_delay400(c, disk->channel);
 
-  if (ata_read(sc, disk->channel, ATA_REG_COMMAND_STATUS) == 0) {
+  if (ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS) == 0) {
     printf("Disk %d absent (wouldn't accept command).\n", disknum);
     return;
   }
 
-  ata_wait(sc, disk->channel);
-  if (read_altstatus(sc, disk->channel) & ATA_STATUS_FLAG_ERROR) {
+  ata_wait(c, disk->channel);
+  if (read_altstatus(c, disk->channel) & ATA_STATUS_FLAG_ERROR) {
     printf("Disk %d absent (wouldn't identify).\n", disknum);
     return;
   }
@@ -206,7 +214,7 @@ static void setup_disk(struct hdd_softc *sc, int disknum) {
   /* ATAPI devices return special values in LBA_MID and LBA_HIGH. We
      don't check those here. (TODO) */
 
-  ata_pio_read(sc, disk->channel, disk->identification_space, sizeof(disk->identification_space));
+  ata_pio_read(c, disk->channel, disk->identification_space, sizeof(disk->identification_space));
 
   memcpy(disk->serial_number, &disk->identification_space[20], sizeof(disk->serial_number));
   memcpy(disk->firmware_revision, &disk->identification_space[46], sizeof(disk->firmware_revision));
@@ -233,16 +241,21 @@ static void setup_disk(struct hdd_softc *sc, int disknum) {
   disk->valid = 1;
 
   /* TODO: register the device for the disk. */
-  /* hd0d0p0 ...? */
+  memcpy(disk->devname, c->devname, 3);
+  disk->devname[3] = 'd';
+  disk->devname[4] = '0' + disknum;
+  disk->devname[5] = '\0';
+  disk->dev = device_create(self, disk->devname, D_BLK | D_PROT);
+  *((struct ata_disk **) device_private(disk->dev)) = disk;
 }
 
-static void setup_device(struct driver *self, struct pci_device *v) {
+static void setup_controller(struct driver *self, struct pci_device *v) {
   static char which_device = '0';
   char devname_tmp[4];
   int primary_native;
   int secondary_native;
 
-  struct hdd_softc *sc;
+  struct ata_controller *c;
   struct irp *irp;
   device_t dev;
 
@@ -278,20 +291,18 @@ static void setup_device(struct driver *self, struct pci_device *v) {
     n[2] = which_device++; /* barrrrrrrrrrrrrrf */
     n[3] = '\0';
     /* Why is there a vsprintf but no vsnprintf or snprintf? */
-    dev = device_create(self, n, D_BLK | D_PROT);
   }
 
   printf("device %d.%d.%d = %s\n", v->bus, v->slot, v->function, devname_tmp);
 
-  sc = device_private(dev);
-  sc->dev = dev;
-  memcpy(&sc->devname[0], &devname_tmp[0], sizeof(devname_tmp));
-  sc->pci_dev = v;
-  sc->isopen = 0;
+  c = kmem_alloc(sizeof(struct ata_controller));
+  memcpy(&c->devname[0], &devname_tmp[0], sizeof(devname_tmp));
+  c->pci_dev = v;
+  c->isopen = 0;
 
-  irp = &sc->irp;
+  irp = &c->irp;
   irp->cmd = IO_NONE;
-  event_init(&irp->iocomp, &sc->devname[0]);
+  event_init(&irp->iocomp, &c->devname[0]);
 
   /* TODO: if we're operating in compatibility/legacy mode, we are
      behaving like an old school IDE adapter, which wants to use IRQ14
@@ -300,61 +311,61 @@ static void setup_device(struct driver *self, struct pci_device *v) {
      work. */
 
   /* TODO: claiming an IRQ more than once causes, um, issues, so don't do that. Ever. */
-  sc->irq = irq_attach(HDC_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, sc);
+  c->irq = irq_attach(HDC_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
 
   if (primary_native || secondary_native) {
     /* Tell the controller which IRQ to use, if we're in native mode. */
     write_pci_interrupt_line(v, HDC_IRQ);
   }
 
-  sc->buffer = ptokv(page_alloc(BUFFER_LENGTH));
+  c->buffer = ptokv(page_alloc(BUFFER_LENGTH));
 
   /* TODO: It is unclear whether, in native mode, the BARs contain
      port numbers directly, or whether they should be masked with
      ~0x03. The low two bits might be used as flags?? */
 
   if (primary_native) {
-    sc->channel[0].base_port = read_pci_bar(v, 0);
-    sc->channel[0].control_port = read_pci_bar(v, 1) + 2;
+    c->channel[0].base_port = read_pci_bar(v, 0);
+    c->channel[0].control_port = read_pci_bar(v, 1) + 2;
   } else {
-    sc->channel[0].base_port = ATA_LEGACY_PRIMARY_CONTROL_BASE;
-    sc->channel[0].control_port =
+    c->channel[0].base_port = ATA_LEGACY_PRIMARY_CONTROL_BASE;
+    c->channel[0].control_port =
       ATA_LEGACY_PRIMARY_CONTROL_BASE + ATA_LEGACY_CONTROL_ALTERNATE_STATUS_OFFSET;
   }
 
   if (secondary_native) {
-    sc->channel[1].base_port = read_pci_bar(v, 2);
-    sc->channel[1].control_port = read_pci_bar(v, 3) + 2;
+    c->channel[1].base_port = read_pci_bar(v, 2);
+    c->channel[1].control_port = read_pci_bar(v, 3) + 2;
   } else {
-    sc->channel[1].base_port = ATA_LEGACY_SECONDARY_CONTROL_BASE;
-    sc->channel[1].control_port =
+    c->channel[1].base_port = ATA_LEGACY_SECONDARY_CONTROL_BASE;
+    c->channel[1].control_port =
       ATA_LEGACY_SECONDARY_CONTROL_BASE + ATA_LEGACY_CONTROL_ALTERNATE_STATUS_OFFSET;
   }
 
   /* BAR4 points to a 16-byte block of I/O port space, the low 8 bytes
      of which are for the primary and the high 8 bytes for the
      secondary controller. */
-  sc->channel[0].dma_port = read_pci_bar(v, 4);
-  sc->channel[1].dma_port = sc->channel[0].dma_port + 8;
+  c->channel[0].dma_port = read_pci_bar(v, 4);
+  c->channel[1].dma_port = c->channel[0].dma_port + 8;
 
   printf(" - pri 0x%04x/0x%04x/0x%04x, sec 0x%04x/0x%04x/0x%04x\n",
-	 sc->channel[0].base_port, sc->channel[0].control_port, sc->channel[0].dma_port,
-	 sc->channel[1].base_port, sc->channel[1].control_port, sc->channel[1].dma_port);
+	 c->channel[0].base_port, c->channel[0].control_port, c->channel[0].dma_port,
+	 c->channel[1].base_port, c->channel[1].control_port, c->channel[1].dma_port);
 
   /* Disable interrupts from the two channels. */
-  write_control(sc, 0, 2);
-  write_control(sc, 1, 2);
+  write_control(c, 0, 2);
+  write_control(c, 1, 2);
 
   {
     int disk;
     for (disk = 0; disk < 4; disk++) {
-      setup_disk(sc, disk);
+      setup_disk(self, c, disk);
     }
   }
 
   /* Reenable interrupts from the two channels. */
-  write_control(sc, 0, 0);
-  write_control(sc, 1, 0);
+  write_control(c, 0, 0);
+  write_control(c, 1, 0);
 }
 
 static int hdd_init(struct driver *self) {
@@ -365,46 +376,50 @@ static int hdd_init(struct driver *self) {
     if (v->class_code == PCI_CLASS_STORAGE &&
 	v->subclass == 1 /* IDE */)
     {
-      setup_device(self, v);
+      setup_controller(self, v);
     }
   }
 
   return 0;
 }
 
-static int hdd_open(device_t dev, int mode) {
-  struct hdd_softc *sc = device_private(dev);
+static struct ata_disk *get_disk(device_t dev) {
+  return * (struct ata_disk **) device_private(dev);
+}
 
-  if (sc->isopen > 0) {
+static int hdd_open(device_t dev, int mode) {
+  struct ata_disk *disk = get_disk(dev);
+
+  if (disk->controller->isopen > 0) {
     return EBUSY;
   }
   /* Is this a race? fdd.c does the same thing. */
-  sc->isopen++;
-  sc->irp.cmd = IO_NONE;
+  disk->controller->isopen++;
+  disk->controller->irp.cmd = IO_NONE;
   return 0;
 }
 
 static int hdd_close(device_t dev) {
-  struct hdd_softc *sc = device_private(dev);
+  struct ata_disk *disk = get_disk(dev);
 
-  if (sc->isopen != 1) {
+  if (disk->controller->isopen != 1) {
     return EINVAL;
   }
   /* Is this a race? fdd.c does the same thing. */
-  sc->isopen--;
-  sc->irp.cmd = IO_NONE;
+  disk->controller->isopen--;
+  disk->controller->irp.cmd = IO_NONE;
   /* TODO: reset the controller perhaps? Or shut it down? The fdd
      driver switches off the drive motor here. */
   return 0;
 }
 
 static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blnko) {
-  struct hdd_softc *sc = device_private(dev);
+  struct ata_disk *disk = get_disk(dev);
   return EINVAL;
 }
 
 static int hdd_write(device_t dev, char *buf, size_t *nbyte, int blkno) {
-  struct hdd_softc *sc = device_private(dev);
+  struct ata_disk *disk = get_disk(dev);
   return EINVAL;
 }
 
@@ -420,7 +435,7 @@ static struct devops hdd_devops = {
 struct driver hdd_driver = {
 	/* name */	"hdd",
 	/* devsops */	&hdd_devops,
-	/* devsz */	sizeof(struct hdd_softc),
+	/* devsz */	sizeof(struct ata_disk *),
 	/* flags */	0,
 	/* probe */	NULL,
 	/* init */	hdd_init,
