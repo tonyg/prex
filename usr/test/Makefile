@@ -5,7 +5,7 @@ SUBDIR:=	task thread ipc timer exception fault deadlock sem mutex \
 		cpufreq ipc_mt kmon attack stack memleak object
 
 # Test for driver
-SUBDIR+=	console kbd fdd ramdisk reset time zero
+SUBDIR+=	console kbd fdd hdd ramdisk reset time zero
 
 # Test for library
 SUBDIR+=	errno malloc stderr environ
