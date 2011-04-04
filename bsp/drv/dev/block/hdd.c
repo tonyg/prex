@@ -12,6 +12,9 @@ typedef unsigned long long uint64_t; /* Hmm. */
    http://www.intel.com/assets/pdf/datasheet/290562.pdf
    http://www.t13.org/Documents/UploadedDocuments/project/d0948r4c-ATA-2.pdf
    http://www.t13.org/Documents/UploadedDocuments/docs2007/D1699r4a-ATA8-ACS.pdf
+   http://www.t13.org/documents/UploadedDocuments/docs2006/D1700r3-ATA8-AAM.pdf
+   http://suif.stanford.edu/~csapuntz/specs/pciide.ps
+   http://suif.stanford.edu/~csapuntz/specs/idems100.ps
 */
 
 #define HDC_IRQ		14	/* Yeah, there are more than 16 these days.
@@ -56,6 +59,7 @@ typedef enum ata_port_register_t_ {
 typedef enum ata_status_flag_t_ {
   ATA_STATUS_FLAG_ERROR = 0x01,
   ATA_STATUS_FLAG_DRQ = 0x08,
+  ATA_STATUS_FLAG_DEVICE_FAILURE = 0x20,
   ATA_STATUS_FLAG_BUSY = 0x80
 } ata_status_flag_t;
 
@@ -170,7 +174,7 @@ static int hdc_isr(void *arg) {
   struct ata_controller *c = arg;
   struct ata_disk *disk = c->active_disk;
   uint8_t status = read_altstatus(c, disk->channel);
-  if (status & ATA_STATUS_FLAG_DRQ) {
+  if (status & (ATA_STATUS_FLAG_DRQ | ATA_STATUS_FLAG_DEVICE_FAILURE | ATA_STATUS_FLAG_ERROR)) {
     return INT_CONTINUE;
   } else {
     return 0;
@@ -185,8 +189,8 @@ static void hdc_ist(void *arg) {
 
   c->active_disk = NULL;
 
-  if (status & ATA_STATUS_FLAG_ERROR) {
-    irp->error = 0x80000000 | ata_read(c, disk->channel, ATA_REG_ERR);
+  if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
+    irp->error = 0x80000000 | (status << 16) | ata_read(c, disk->channel, ATA_REG_ERR);
     sched_wakeup(&irp->iocomp);
     return;
   }
@@ -250,13 +254,15 @@ static void hdd_setup_io(struct ata_disk *disk,
    everything up. */
 static int read_during_setup(struct ata_disk *disk, uint64_t lba, uint8_t *buf, size_t count) {
   struct ata_controller *c = disk->controller;
+  int status;
   hdd_setup_io(disk, IO_READ, lba, count);
   ata_wait(c, disk->channel);
-  if (ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS) & ATA_STATUS_FLAG_ERROR) {
-    printf("Couldn't read_during_setup %s (lba %d, count %d): 0x%02x\n",
+  status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
+  if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
+    printf("Couldn't read_during_setup %s (lba %d, count %d): 0x%02x, 0x%02x\n",
 	   disk->devname,
 	   lba, count,
-	   ata_read(c, disk->channel, ATA_REG_ERR));
+	   status, ata_read(c, disk->channel, ATA_REG_ERR));
     return EIO;
   }
 
@@ -603,7 +609,8 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
     err = hdd_rw(disk, &disk->controller->irp, IO_READ,
 		 disk->controller->buffer, transfer_sector_count, blkno);
     if (err) {
-      printf("HDD error: %d\n", err);
+      printf("hdd_read error: %d\n", err);
+      *nbyte = transferred_total;
       return EIO;
     }
 
