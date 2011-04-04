@@ -629,6 +629,43 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
 static int hdd_write(device_t dev, char *buf, size_t *nbyte, int blkno) {
   struct ata_disk *disk = get_disk(dev);
   return EINVAL;
+  /*
+  uint8_t *kbuf;
+  size_t sector_count = *nbyte / SECTOR_SIZE;
+  size_t transferred_total = 0;
+
+  if ((blkno < 0) || (blkno + sector_count >= disk->addressable_sector_count))
+    return EIO;
+
+  kbuf = kmem_map(buf, *nbyte);
+  if (kbuf == NULL)
+    return EFAULT;
+
+  while (sector_count > 0) {
+    size_t transfer_sector_count =
+      (sector_count > BUFFER_LENGTH_IN_SECTORS) ? BUFFER_LENGTH_IN_SECTORS : sector_count;
+    size_t transfer_byte_count = SECTOR_SIZE * transfer_sector_count;
+    int err;
+
+    memcpy(disk->controller->buffer, kbuf, transfer_byte_count);
+
+    err = hdd_rw(disk, &disk->controller->irp, IO_WRITE,
+		 disk->controller->buffer, transfer_sector_count, blkno);
+    if (err) {
+      printf("hdd_write error: %d\n", err);
+      *nbyte = transferred_total;
+      return EIO;
+    }
+
+    transferred_total += transfer_byte_count;
+    kbuf += transfer_byte_count;
+    blkno += transfer_sector_count;
+    sector_count -= transfer_sector_count;
+  }
+
+  *nbyte = transferred_total;
+  return 0;
+  */
 }
 
 static struct devops hdd_devops = {
