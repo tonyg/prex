@@ -39,102 +39,102 @@
 int
 test_read(int sector)
 {
-	device_t hdd;
-	size_t size;
-	int error, i, j;
-	static unsigned char disk_buf[512];
-	unsigned char ch;
+        device_t hdd;
+        size_t size;
+        int error, i, j;
+        static unsigned char disk_buf[512];
+        unsigned char ch;
 
-	printf("open hd0d0\n");
-	error = device_open("hd0d0", 0, &hdd);
-	if (error) {
-		printf("open failed\n");
-		return 0;
-	}
-	printf("opened\n");
+        printf("open hd0d0\n");
+        error = device_open("hd0d0", 0, &hdd);
+        if (error) {
+                printf("open failed\n");
+                return 0;
+        }
+        printf("opened\n");
 
-	printf("hdd read: sector=%d buf=%x\n", sector, (u_int)disk_buf);
-	size = 512;
-	error = device_read(hdd, disk_buf, &size, sector);
-	if (error) {
-		printf("read failed\n");
-		device_close(hdd);
-		return 0;
-	}
-	printf("read comp: sector=%d buf=%x\n", sector, (u_int)disk_buf);
+        printf("hdd read: sector=%d buf=%x\n", sector, (u_int)disk_buf);
+        size = 512;
+        error = device_read(hdd, disk_buf, &size, sector);
+        if (error) {
+                printf("read failed\n");
+                device_close(hdd);
+                return 0;
+        }
+        printf("read comp: sector=%d buf=%x\n", sector, (u_int)disk_buf);
 
-	for (i = 0; i < (512 / 16); i++) {
-		for (j = 0; j < 16; j++)
-			printf("%02x ", disk_buf[i * 16 + j]);
-		printf("    ");
-		for (j = 0; j < 16; j++) {
-			ch = disk_buf[i * 16 + j];
-			if (isprint(ch))
-				putchar(ch);
-			else
-				putchar('.');
+        for (i = 0; i < (512 / 16); i++) {
+                for (j = 0; j < 16; j++)
+                        printf("%02x ", disk_buf[i * 16 + j]);
+                printf("    ");
+                for (j = 0; j < 16; j++) {
+                        ch = disk_buf[i * 16 + j];
+                        if (isprint(ch))
+                                putchar(ch);
+                        else
+                                putchar('.');
 
-		}
-		printf("\n");
-	}
-	printf("\n");
-	error = device_close(hdd);
-	if (error)
-		printf("close failed\n");
+                }
+                printf("\n");
+        }
+        printf("\n");
+        error = device_close(hdd);
+        if (error)
+                printf("close failed\n");
 
-	return 0;
+        return 0;
 }
 
 int
 test_write(int sector)
 {
-	device_t hdd;
-	size_t size;
-	int error;
-	static unsigned char disk_buf[512];
+        device_t hdd;
+        size_t size;
+        int error;
+        static unsigned char disk_buf[512];
 
-	printf("open hd0d0\n");
-	error = device_open("hd0d0", 0, &hdd);
-	if (error) {
-		printf("open failed\n");
-		return 0;
-	}
-	printf("opened\n");
+        printf("open hd0d0\n");
+        error = device_open("hd0d0", 0, &hdd);
+        if (error) {
+                printf("open failed\n");
+                return 0;
+        }
+        printf("opened\n");
 
-	size = 512;
-	error = device_read(hdd, disk_buf, &size, sector);
-	if (error) {
-		printf("read failed\n");
-		device_close(hdd);
-		return 0;
-	}
-	printf("read comp sector=%d\n", sector);
+        size = 512;
+        error = device_read(hdd, disk_buf, &size, sector);
+        if (error) {
+                printf("read failed\n");
+                device_close(hdd);
+                return 0;
+        }
+        printf("read comp sector=%d\n", sector);
 
-	size = 512;
-	error = device_write(hdd, disk_buf, &size, sector);
-	if (error) {
-		printf("write failed\n");
-		device_close(hdd);
-		return 0;
-	}
-	printf("write comp sector=%d\n", sector);
+        size = 512;
+        error = device_write(hdd, disk_buf, &size, sector);
+        if (error) {
+                printf("write failed\n");
+                device_close(hdd);
+                return 0;
+        }
+        printf("write comp sector=%d\n", sector);
 
-	error = device_close(hdd);
-	if (error)
-		printf("close failed\n");
-	return 0;
+        error = device_close(hdd);
+        if (error)
+                printf("close failed\n");
+        return 0;
 }
 
 int
 main(int argc, char *argv[])
 {
-	test_read(0);
-	/*
-	test_read(1);
-	test_read(2);
+        test_read(0);
+        /*
+        test_read(1);
+        test_read(2);
 
-	test_write(1);
-	*/
+        test_write(1);
+        */
 
-	return 0;
+        return 0;
 }

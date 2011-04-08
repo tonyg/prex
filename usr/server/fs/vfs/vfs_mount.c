@@ -77,8 +77,8 @@ fs_getfs(char *name)
 	const struct vfssw *fs;
 
 	for (fs = vfssw; fs->vs_name; fs++) {
-		if (!strncmp(name, fs->vs_name, FSMAXNAMES))
-			break;
+          if (!strncmp(name, fs->vs_name, FSMAXNAMES))
+            break;
 	}
 	if (!fs->vs_name)
 		return NULL;
@@ -323,12 +323,12 @@ vfs_findroot(char *path, mount_t *mp, char **root)
 	m = NULL;
 	head = &mount_list;
 	for (n = list_first(head); n != head; n = list_next(n)) {
-		tmp = list_entry(n, struct mount, m_link);
-		len = count_match(path, tmp->m_path);
-		if (len > max_len) {
-			max_len = len;
-			m = tmp;
-		}
+          tmp = list_entry(n, struct mount, m_link);
+          len = count_match(path, tmp->m_path);
+          if (len > max_len) {
+            max_len = len;
+            m = tmp;
+          }
 	}
 	MOUNT_UNLOCK();
 	if (m == NULL)

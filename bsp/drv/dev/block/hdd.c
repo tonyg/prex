@@ -1,3 +1,4 @@
+#include <sys/param.h>
 #include <driver.h>
 #include <pci.h>
 
@@ -96,12 +97,12 @@ struct ata_disk {
   uint32_t sector_capacity;
   uint64_t addressable_sector_count;
 
-  char devname[6]; /* "hdXdX\0" TODO: fix magic number */
+  char devname[MAXDEVNAME]; /* "hdXdX\0" TODO: fix magic number */
   device_t dev; /* the PREX device */
 };
 
 struct ata_controller {
-  char devname[4]; /* "hdX\0" TODO: fix magic number */
+  char devname[MAXDEVNAME]; /* "hdX\0" TODO: fix magic number */
   struct pci_device *pci_dev;
   int isopen; /* FIXME: do we care? */
   struct irp irp;
@@ -170,6 +171,7 @@ static void ata_pio_read(struct ata_controller *c,
   }
 }
 
+/* interrupt status register. How is the device doing? */
 static int hdc_isr(void *arg) {
   struct ata_controller *c = arg;
   struct ata_disk *disk = c->active_disk;
@@ -181,6 +183,7 @@ static int hdc_isr(void *arg) {
   }
 }
 
+/* interrupt service thread. The make workhorse for communicating with the device. */
 static void hdc_ist(void *arg) {
   struct ata_controller *c = arg;
   struct ata_disk *disk = c->active_disk;

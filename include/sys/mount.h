@@ -39,6 +39,7 @@
 
 typedef struct { int32_t val[2]; } fsid_t;	/* file system id type */
 
+#define MAX_VFS_TYPE 20 /* FIXME: Magic number */
 
 /*
  * file system statistics
@@ -94,18 +95,20 @@ typedef struct mount *mount_t;
 #define	MNT_DEFEXPORTED	0x00000200	/* exported to the world */
 #define	MNT_EXPORTANON	0x00000400	/* use anon uid mapping for everyone */
 #define	MNT_EXKERB	0x00000800	/* exported with Kerberos uid mapping */
+#define	MNT_FORCE	0x00001000	/* force the mounting */
+#define	MNT_UPDATE	0x00002000	/* update a currently mounted volume */
 
 /*
  * Flags set by internal operations.
  */
-#define	MNT_LOCAL	0x00001000	/* filesystem is stored locally */
-#define	MNT_QUOTA	0x00002000	/* quotas are enabled on filesystem */
-#define	MNT_ROOTFS	0x00004000	/* identifies the root filesystem */
+#define	MNT_LOCAL	0x00004000	/* filesystem is stored locally */
+#define	MNT_QUOTA	0x00008000	/* quotas are enabled on filesystem */
+#define	MNT_ROOTFS	0x00010000	/* identifies the root filesystem */
 
 /*
  * Mask of flags that are visible to statfs()
  */
-#define	MNT_VISFLAGMASK	0x0000ffff
+#define	MNT_VISFLAGMASK	0x000fffff
 
 /*
  * Filesystem type switch table.
