@@ -153,6 +153,7 @@ int	mount(const char *, const char *, const char *, int, void *);
 int	umount(const char *);
 int	vfs_nullop(void);
 int	vfs_einval(void);
+int	vfs_simple_findroot(char const *path, char *m_path, dev_t *m_dev, int *m_flags);
 __END_DECLS
 
 #endif	/* !_SYS_MOUNT_H_ */

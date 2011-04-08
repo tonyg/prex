@@ -15,7 +15,7 @@ static void     usage(void);
 static void     mountall(int, char *, const char **);
 static void      mountupdate(int, const char *, char *, char **);
 static void      mounttrycanonical(int, const char *, char *, char **);
-static int mount_on_name(mount_t, char *);
+static int mount_on_name(dev_t, char *);
 
 int
 main(int argc, char *argv[])
@@ -105,7 +105,7 @@ void mountall(int init_flags, char *options, const char **vfslist)
   fstab_traversal trav;
   fstab fs;
   char *mntfromname;
-  mount_t mnt = NULL;
+  char m_path[PATH_MAX];
   
   trav.data = &fs;
 
@@ -123,15 +123,15 @@ void mountall(int init_flags, char *options, const char **vfslist)
     if (hasopt(fs.fs_mntopts, "noauto"))
       continue;
     if (strcmp(fs.fs_special, "from_mount") == 0) {
-      if (vfs_findroot(fs.fs_file, &mnt, &mntfromname) != 0) {
+      if (vfs_simple_findroot(fs.fs_file, m_path, NULL, NULL) != 0) {
         printf("unknown file system %s.", fs.fs_file);
         exit(1);
       }
-      mntfromname = mnt->m_path;
+      mntfromname = m_path;
     } else {
       mntfromname = fs.fs_special;
     }
-    mount(fs.fs_special,fs.fs_file,fs.fs_type,init_flags,0);
+    mount(mntfromname, fs.fs_file, fs.fs_type, init_flags, 0);
     rval = 1;
   }
   closefstab(&trav);
@@ -146,34 +146,37 @@ void
 mountupdate(int init_flags, const char *options, char *canonical_path, char **argv)
 {
   fstab fs;
-  char *mntfromname, special[MAX_FS_SPECIAL];
-  vnode_t vpp;
-  mount_t mnt;
-  if ((vfs_findroot(canonical_path, &mnt, &mntfromname) != 0) &&
-      (vfs_findroot(*argv, &mnt, &mntfromname) != 0))
+  char special[MAX_FS_SPECIAL];
+  char m_path[PATH_MAX];
+  dev_t m_dev;
+  char *mntfromname = NULL;
+
+  if ((vfs_simple_findroot(canonical_path, m_path, &m_dev, NULL) != 0) &&
+      (vfs_simple_findroot(*argv, m_path, &m_dev, NULL) != 0))
     {
       printf("unknown special file or file system %s.", *argv);
       exit(1);
     }
-  mntfromname = mnt->m_path;
+  mntfromname = m_path;
   
-  mount_on_name(mnt, special);
+  mount_on_name(m_dev, special);
   if (getfsfile(special, &fs)) {
     if (strcmp(fs.fs_special, "from_mount") != 0)
       mntfromname = fs.fs_special;
     /* ignore the fstab file options.  */
     fs.fs_mntopts[0] = '\0';
   }
-  mount(fs.fs_special, fs.fs_file, fs.fs_type, init_flags, NULL);
+
+  mount(mntfromname, fs.fs_file, fs.fs_type, init_flags, NULL);
 }
 
-int mount_on_name(mount_t mnt, char *result) {
+int mount_on_name(dev_t dev, char *result) {
   struct devinfo itr;
   itr.cookie = 0;
   while (sys_info(INFO_DEVICE, &itr) == 0) {
     /* For some braindead reason, Kousuke uses dev_t for m_dev
      * instead of device_t. There is an explicit cast in vfs_mount.c */
-    if (itr.id == (device_t)(mnt->m_dev)) {
+    if (itr.id == (device_t)(dev)) {
       snprintf(result, MAX_FS_SPECIAL, "/dev/%s", itr.name);
       return 1; /* found */
     }
@@ -187,7 +190,8 @@ mounttrycanonical(int init_flags, const char *options, char *canonical_path, cha
 {
   fstab fs;
   char *mntfromname;
-  mount_t mnt = NULL;
+  char m_path[PATH_MAX];
+
   /*
    * Try looking up the canonical path first,
    * then try exactly what the user entered.
@@ -214,12 +218,12 @@ mounttrycanonical(int init_flags, const char *options, char *canonical_path, cha
   }
   
   if (strcmp(fs.fs_special, "from_mount") == 0) {
-    if (vfs_findroot(canonical_path, &mnt, &mntfromname) != 0)
+    if (vfs_simple_findroot(canonical_path, m_path, NULL, NULL) != 0)
       {
         printf("unknown special file or file system %s.", *argv);
         exit(1);
       }
-    mntfromname = mnt->m_path;
+    mntfromname = m_path;
   } else {
     mntfromname = fs.fs_special;
   }

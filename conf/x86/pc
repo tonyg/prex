@@ -141,3 +141,4 @@ command 	pmctrl
 command 	ktrace
 command 	lock
 command 	debug
+command		mount

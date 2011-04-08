@@ -81,6 +81,7 @@
 #define FS_TRUNCATE	0x00000224
 #define FS_FTRUNCATE	0x00000225
 #define FS_FCHDIR	0x00000226
+#define FS_FINDROOT	0x00000227
 
 /*
  * Mount message
@@ -164,6 +165,17 @@ struct fcntl_msg {
 	int	cmd;			/* command */
 	int	arg;			/* argument */
 	struct flock lock;		/* file lock data */
+};
+
+/*
+ * vfs_findroot message
+ */
+struct findroot_msg {
+  struct msg_header hdr;		/* message header */
+  char path[PATH_MAX];			/* input: path to find mount info for */
+					/* output: path where the fs was mounted */
+  dev_t dev;				/* output: device that was mounted */
+  int flags;				/* output: mount flags */
 };
 
 

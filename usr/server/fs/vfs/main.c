@@ -464,6 +464,22 @@ fs_fchdir(struct task *t, struct msg *msg)
 }
 
 static int
+fs_findroot(struct task *t, struct findroot_msg *msg)
+{
+  mount_t mp;
+  char *offset = NULL;
+
+  if (vfs_findroot(msg->path, &mp, &offset) != 0) {
+    return ENOENT;
+  }
+
+  strlcpy(msg->path, mp->m_path, PATH_MAX);
+  msg->dev = mp->m_dev;
+  msg->flags = mp->m_flags;
+  return 0;
+}
+
+static int
 fs_link(struct task *t, struct msg *msg)
 {
 	/* XXX */
@@ -1012,6 +1028,7 @@ static const struct msg_map fsmsg_map[] = {
 	MSGMAP( FS_TRUNCATE,	fs_truncate ),
 	MSGMAP( FS_FTRUNCATE,	fs_ftruncate ),
 	MSGMAP( FS_FCHDIR,	fs_fchdir ),
+	MSGMAP( FS_FINDROOT,    fs_findroot ),
 	MSGMAP( STD_BOOT,	fs_boot ),
 	MSGMAP( STD_SHUTDOWN,	fs_shutdown ),
 #ifdef DEBUG_VFS
