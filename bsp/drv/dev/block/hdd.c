@@ -30,12 +30,14 @@ typedef unsigned long long uint64_t; /* Hmm. */
 
 #define SECTOR_SIZE	512
 
+/* These are the offsets to various IDE/ATA registers, relative to
+ * ata_channel.base_port in I/O port space. */
 typedef enum ata_port_register_t_ {
   ATA_REG_DATA = 0,
   ATA_REG_ERR = 1, /* osdev.org claims this is mostly for ATAPI? */
   ATA_REG_SECTOR_COUNT = 2,
 
-  /* CHS addressing */
+  /* CHS addressing, which this driver doesn't use or support */
   ATA_REG_SECTOR_NUMBER = 3,
   ATA_REG_CYLINDER_LOW = 4,
   ATA_REG_CYLINDER_HIGH = 5,
@@ -49,14 +51,24 @@ typedef enum ata_port_register_t_ {
   ATA_REG_COMMAND_STATUS = 7
 } ata_port_register_t;
 
+/* Some controllers operate in "PCI native" mode, where they specify
+   the I/O ports they want us to use. Others operate in
+   "compatibility" (a.k.a. legacy) mode, where we just have to know
+   ahead of time that the following two ports are used to communicate
+   with the controller. */
 #define ATA_LEGACY_PRIMARY_CONTROL_BASE		0x1f0
 #define ATA_LEGACY_SECONDARY_CONTROL_BASE	0x170
-/* In "legacy" mode, the control block base port number + this offset
-   is the port number of the control/altstatus register. In PCI IDE
-   mode, we look at the BARs instead: BAR1 points to a 4-byte space,
-   within which offset 2 is the control/altstatus register. */
+/* In "legacy" mode, the control block base port number + the
+   following offset is the port number of the control/altstatus
+   register. In PCI native IDE mode, we look at the BARs instead: BAR1
+   points to a 4-byte space, within which offset 2 is the
+   control/altstatus register. */
 #define ATA_LEGACY_CONTROL_ALTERNATE_STATUS_OFFSET 0x206
 
+/* These flags appear in the contents of ATA_REG_ERR. These aren't the
+   only flags that exist, there are others (see the various sources of
+   information linked above), but these are the only ones this driver
+   cares about for now. */
 typedef enum ata_status_flag_t_ {
   ATA_STATUS_FLAG_ERROR = 0x01,
   ATA_STATUS_FLAG_DRQ = 0x08,
@@ -72,20 +84,35 @@ typedef enum ata_status_flag_t_ {
 #define DPRINTF(a)
 #endif
 
+/* At present, we limit individual transfers to a maximum of
+   BUFFER_LENGTH bytes. TODO: once we have a request queue, this will
+   probably become obsolete. Doubly so once we switch to DMA. */
 #define BUFFER_LENGTH 65536 /* FIXME: proper caching please */
 #define BUFFER_LENGTH_IN_SECTORS (BUFFER_LENGTH / SECTOR_SIZE)
 
+/**
+ * Represents a single channel within an IDE controller. IDE
+ * controllers have *two* channels: primary and secondary. On each
+ * channel, there can be up to two disks/devices. Each channel is
+ * accessed via a different region of I/O port space. */
 struct ata_channel {
   int base_port;
   int control_port;
   int dma_port;
 };
 
+/**
+ * Represents a detected ATA disk/device attached to a channel of a
+ * controller. */
 struct ata_disk {
-  int valid;
-  struct ata_controller *controller;
-  int channel;
+  int valid; /* TODO: once we switch to dynamic instances of this struct, this field can vanish */
+  struct ata_controller *controller; /* the controller for this device */
+  int channel; /* 0 => primary, 1 => secondary */
   int slave; /* 0 => master, 1 => slave */
+
+  /* Copy of the ATA identification space buffer sent back in response
+     to the ATA IDENTIFY command for this device. Some of the fields
+     in this buffer are extracted into fields below. */
   uint8_t identification_space[512];
 
   /* These fields are extracted from identification_space: */
@@ -97,34 +124,44 @@ struct ata_disk {
   uint32_t sector_capacity;
   uint64_t addressable_sector_count;
 
+  /* The name of this device as it is known to the kernel. The file
+     system's "/dev" node for this device is named using this. */
   char devname[MAXDEVNAME]; /* "hdXdX\0" */
-  device_t dev; /* the PREX device */
+  device_t dev; /* the PREX kernel's device handle for this device */
+
+  /* TODO: linked list of partitions within a disk */
 };
 
+/**
+ * Represents a single IDE controller. */
 struct ata_controller {
-  char devname[MAXDEVNAME]; /* "hdX\0" */
-  struct pci_device *pci_dev;
-  int isopen; /* FIXME: do we care? */
-  struct irp irp;
-  struct ata_disk *active_disk; /* disk using the irp right now */
-  irq_t irq;
-  struct ata_channel channel[2];
-  struct ata_disk disk[4];
-  uint8_t *buffer;
+  char devname[MAXDEVNAME]; /* "hdX\0"; used for debugging etc. */
+  struct pci_device *pci_dev; /* the PCI config for this device */
+  int isopen; /* FIXME: do we care? TODO: no, not really; switch to a request queue */
+  struct irp irp; /* TODO: switch to a request queue */
+  struct ata_disk *active_disk; /* disk using the irp right now TODO: switch to a request queue */
+  irq_t irq; /* we registered an IRQ with the kernel; this is the handle we were given */
+  struct ata_channel channel[2]; /* the two channels within the controller */
+  struct ata_disk disk[4]; /* TODO: switch to a linked list of disks */
+  uint8_t *buffer; /* TODO: switch to a request queue */
 };
 
+/* Writes to an ATA control register. */
 static void ata_write(struct ata_controller *c, int channelnum, int reg, uint8_t val) {
   bus_write_8(c->channel[channelnum].base_port + reg, val);
 }
 
+/* Reads from an ATA control register. */
 static uint8_t ata_read(struct ata_controller *c, int channelnum, int reg) {
   return bus_read_8(c->channel[channelnum].base_port + reg);
 }
 
+/* Writes to the special control/altstatus register. */
 static void write_control(struct ata_controller *c, int channelnum, uint8_t val) {
   bus_write_8(c->channel[channelnum].control_port, val);
 }
 
+/* Reads from the special control/altstatus register. */
 static uint8_t read_altstatus(struct ata_controller *c, int channelnum) {
   return bus_read_8(c->channel[channelnum].control_port);
 }
@@ -138,6 +175,7 @@ static void ata_delay400(struct ata_controller *c, int channelnum) {
   read_altstatus(c, channelnum);
 }
 
+/* Poll until the BUSY flag clears. */
 static void ata_wait(struct ata_controller *c, int channelnum) {
   unsigned int i;
 
@@ -154,6 +192,7 @@ static void ata_wait(struct ata_controller *c, int channelnum) {
      in-progress operations. */
 }
 
+/* Programmed I/O (PIO) read a buffer's worth of data from the controller. */
 static void ata_pio_read(struct ata_controller *c,
 			 int channelnum,
 			 uint8_t *buffer,
@@ -216,6 +255,9 @@ static void hdc_ist(void *arg) {
   sched_wakeup(&irp->iocomp);
 }
 
+/* Sends an I/O command to the disk, including the address of the
+   block concerned, using LBA48 mode. Usable for setting up either
+   interrupt-based or polling-based transfers. */
 static void hdd_setup_io(struct ata_disk *disk,
 			 int cmd,
 			 uint64_t lba,
