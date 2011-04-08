@@ -97,12 +97,12 @@ struct ata_disk {
   uint32_t sector_capacity;
   uint64_t addressable_sector_count;
 
-  char devname[MAXDEVNAME]; /* "hdXdX\0" TODO: fix magic number */
+  char devname[MAXDEVNAME]; /* "hdXdX\0" */
   device_t dev; /* the PREX device */
 };
 
 struct ata_controller {
-  char devname[MAXDEVNAME]; /* "hdX\0" TODO: fix magic number */
+  char devname[MAXDEVNAME]; /* "hdX\0" */
   struct pci_device *pci_dev;
   int isopen; /* FIXME: do we care? */
   struct irp irp;
@@ -171,7 +171,8 @@ static void ata_pio_read(struct ata_controller *c,
   }
 }
 
-/* interrupt status register. How is the device doing? */
+/* interrupt service routine. Lowest-level responder to an interrupt -
+   try to avoid doing "real work" here */
 static int hdc_isr(void *arg) {
   struct ata_controller *c = arg;
   struct ata_disk *disk = c->active_disk;
@@ -183,7 +184,8 @@ static int hdc_isr(void *arg) {
   }
 }
 
-/* interrupt service thread. The make workhorse for communicating with the device. */
+/* interrupt service thread. The main workhorse for communicating with
+   the device. */
 static void hdc_ist(void *arg) {
   struct ata_controller *c = arg;
   struct ata_disk *disk = c->active_disk;
@@ -400,7 +402,7 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
 
 static void setup_controller(struct driver *self, struct pci_device *v) {
   static char which_device = '0';
-  char devname_tmp[4];
+  char devname_tmp[MAXDEVNAME];
   int primary_native;
   int secondary_native;
 
@@ -444,7 +446,7 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   printf("device %d.%d.%d = %s\n", v->bus, v->slot, v->function, devname_tmp);
 
   c = kmem_alloc(sizeof(struct ata_controller));
-  memcpy(&c->devname[0], &devname_tmp[0], sizeof(devname_tmp));
+  memcpy(&c->devname[0], &devname_tmp[0], sizeof(c->devname));
   c->pci_dev = v;
   c->isopen = 0;
 
