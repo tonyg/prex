@@ -91,22 +91,42 @@ typedef enum ata_status_flag_t_ {
 #define BUFFER_LENGTH_IN_SECTORS (BUFFER_LENGTH / SECTOR_SIZE)
 
 /**
- * Represents a single channel within an IDE controller. IDE
- * controllers have *two* channels: primary and secondary. On each
- * channel, there can be up to two disks/devices. Each channel is
- * accessed via a different region of I/O port space. */
-struct ata_channel {
-  int base_port;
-  int control_port;
-  int dma_port;
+ * Represents the kernel's handle on some device object exposed
+ * through this driver. */
+struct ata_device_handle {
+  enum {
+    ATA_DEVICE_WHOLEDISK,
+    ATA_DEVICE_PARTITION
+  } kind;
+  union {
+    struct ata_disk *wholedisk;
+    struct ata_partition *partition;
+  } pointer;
+};
+
+/**
+ * Represents a single partition on an ata_disk. */
+struct ata_partition {
+  struct list link; /* link to other partitions within this disk */
+  struct ata_disk *disk; /* the disk this partition is part of */
+
+  uint8_t system_id; /* the partition type, from the partition table */
+  uint32_t start_lba; /* base block address of partition on the disk */
+  uint32_t sector_count; /* total number of SECTORS within the partition */
+
+  /* The name of this device as it is known to the kernel. The file
+     system's "/dev" node for this device is named using this. */
+  char devname[MAXDEVNAME]; /* "hdXdXpXX\0" */
+  device_t dev; /* the PREX kernel's device handle for this device */
 };
 
 /**
  * Represents a detected ATA disk/device attached to a channel of a
  * controller. */
 struct ata_disk {
-  int valid; /* TODO: once we switch to dynamic instances of this struct, this field can vanish */
+  struct list link; /* link to other disks on this controller */
   struct ata_controller *controller; /* the controller for this device */
+
   int channel; /* 0 => primary, 1 => secondary */
   int slave; /* 0 => master, 1 => slave */
 
@@ -129,7 +149,18 @@ struct ata_disk {
   char devname[MAXDEVNAME]; /* "hdXdX\0" */
   device_t dev; /* the PREX kernel's device handle for this device */
 
-  /* TODO: linked list of partitions within a disk */
+  struct list partition_list; /* all detected partitions on the disk */
+};
+
+/**
+ * Represents a single channel within an IDE controller. IDE
+ * controllers have *two* channels: primary and secondary. On each
+ * channel, there can be up to two disks/devices. Each channel is
+ * accessed via a different region of I/O port space. */
+struct ata_channel {
+  int base_port;
+  int control_port;
+  int dma_port;
 };
 
 /**
@@ -137,14 +168,34 @@ struct ata_disk {
 struct ata_controller {
   char devname[MAXDEVNAME]; /* "hdX\0"; used for debugging etc. */
   struct pci_device *pci_dev; /* the PCI config for this device */
-  int isopen; /* FIXME: do we care? TODO: no, not really; switch to a request queue */
   struct irp irp; /* TODO: switch to a request queue */
   struct ata_disk *active_disk; /* disk using the irp right now TODO: switch to a request queue */
   irq_t irq; /* we registered an IRQ with the kernel; this is the handle we were given */
   struct ata_channel channel[2]; /* the two channels within the controller */
-  struct ata_disk disk[4]; /* TODO: switch to a linked list of disks */
+  struct list disk_list; /* all disks attached to this controller */
   uint8_t *buffer; /* TODO: switch to a request queue */
 };
+
+#if 0 /* we don't need this yet */
+/* Append two strings, making sure not to read or write outside each
+   string's allocated area. (I wish C had a unit test framework.) */
+static char *strcat_limited(char *dest, size_t dest_max, const char *src, size_t src_max) {
+  size_t dest_len = strnlen(dest, dest_max);
+  size_t remaining_space = dest_max - dest_len;
+  size_t i;
+  for (i = 0 ; (i < remaining_space) && (i < src_max) && (src[i] != '\0') ; i++) {
+    dest[dest_len + i] = src[i];
+  }
+  if (i < remaining_space) {
+    dest[dest_len + i] = '\0';
+  }
+  return dest;
+}
+#endif
+
+static struct ata_device_handle *get_handle(device_t dev) {
+  return (struct ata_device_handle *) device_private(dev);
+}
 
 /* Writes to an ATA control register. */
 static void ata_write(struct ata_controller *c, int channelnum, int reg, uint8_t val) {
@@ -317,6 +368,7 @@ static int read_during_setup(struct ata_disk *disk, uint64_t lba, uint8_t *buf, 
   return 0;
 }
 
+/* Read a disk's partition table. */
 static void setup_partitions(struct driver *self, struct ata_disk *disk) {
   uint8_t *sector0 = kmem_alloc(SECTOR_SIZE);
 
@@ -337,18 +389,51 @@ static void setup_partitions(struct driver *self, struct ata_disk *disk) {
 	uint32_t start_lba;
 	uint32_t sector_count;
       } *p = (void *) (&sector0[0x1be + (partition * 16)]);
-      printf(" - partition %sp%c, type 0x%02x, 0x%08x size 0x%08x\n",
-	     disk->devname,
-	     '0' + partition,
-	     p->system_id,
-	     p->start_lba,
-	     p->sector_count);
+      struct ata_partition *part = NULL;
+
+      if ((p->start_lba == 0) || (p->sector_count == 0) || (p->system_id == 0)) {
+	/* No allocated partition in this slot. */
+	continue;
+      }
+
+      part = kmem_alloc(sizeof(struct ata_partition));
+
+      list_insert(list_last(&disk->partition_list), &part->link);
+      part->disk = disk;
+      part->system_id = p->system_id;
+      part->start_lba = p->start_lba;
+      part->sector_count = p->sector_count;
+      /* TODO: sanity-check sector_count, to make sure it doesn't
+	 reach past the addressable_sector_count known to the whole
+	 disk. */
+
+      strlcpy(part->devname, disk->devname, MAXDEVNAME);
+      {
+	char *p = part->devname + strnlen(part->devname, MAXDEVNAME);
+	p[0] = 'p';
+	p[1] = '0' + (partition / 10);
+	p[2] = '0' + (partition % 10);
+	p[3] = '\0';
+      }
+      part->dev = device_create(self, part->devname, D_BLK | D_PROT);
+      get_handle(part->dev)->kind = ATA_DEVICE_PARTITION;
+      get_handle(part->dev)->pointer.partition = part;
+
+      printf(" - partition %s, type 0x%02x, 0x%08x size 0x%08x\n",
+	     part->devname,
+	     part->system_id,
+	     part->start_lba,
+	     part->sector_count);
     }
   }
+
+  /* TODO: loop back around and add any partitions found in the table
+     in an extended partition. */
 
   kmem_free(sector0);
 }
 
+/* Byteswap a "string" of 16-bit words. See comments near callers. */
 static void fixup_string_endianness(uint8_t *p, size_t size) {
   while (size > 0) {
     uint8_t tmp = p[1];
@@ -359,11 +444,12 @@ static void fixup_string_endianness(uint8_t *p, size_t size) {
   }
 }
 
-static void setup_disk(struct driver *self, struct ata_controller *c, int disknum) {
-  struct ata_disk *disk = &c->disk[disknum];
+static int setup_disk(struct driver *self, struct ata_controller *c, int disknum) {
+  struct ata_disk *disk = kmem_alloc(sizeof(struct ata_disk));
 
-  disk->valid = 0; /* to be determined properly below */
+  /* disk->link will be initialised once we insert into our controller's disk_list. */
   disk->controller = c;
+
   disk->channel = disknum >> 1;
   disk->slave = disknum & 1;
 
@@ -382,13 +468,13 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
 
   if (ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS) == 0) {
     printf("Disk %d absent (wouldn't accept command).\n", disknum);
-    return;
+    goto cancel_setup;
   }
 
   ata_wait(c, disk->channel);
   if (read_altstatus(c, disk->channel) & ATA_STATUS_FLAG_ERROR) {
     printf("Disk %d absent (wouldn't identify).\n", disknum);
-    return;
+    goto cancel_setup;
   }
 
   /* ATAPI devices return special values in LBA_MID and LBA_HIGH. We
@@ -399,10 +485,23 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
   memcpy(disk->serial_number, &disk->identification_space[20], sizeof(disk->serial_number));
   memcpy(disk->firmware_revision, &disk->identification_space[46], sizeof(disk->firmware_revision));
   memcpy(disk->model, &disk->identification_space[54], sizeof(disk->model));
-  disk->lba_supported = ((disk->identification_space[100] & 2) != 0);
-  disk->dma_supported = ((disk->identification_space[100] & 1) != 0);
+  disk->lba_supported = ((disk->identification_space[99] & 2) != 0);
+  disk->dma_supported = ((disk->identification_space[99] & 1) != 0);
   memcpy(&disk->sector_capacity, &disk->identification_space[114], sizeof(disk->sector_capacity));
 
+  if (!disk->lba_supported) {
+    printf("Disk %d doesn't support LBA.\n", disknum);
+    goto cancel_setup;
+  }
+
+  if (!disk->dma_supported) {
+    printf("Disk %d doesn't support DMA.\n", disknum);
+    goto cancel_setup;
+  }
+
+  /* Decide how many sectors this physical disk supports. If the
+     lba28_count is the maximum possible, the convention is that the
+     lba48_count is valid and should be used. */
   {
     uint32_t lba28_count;
     memcpy(&lba28_count, &disk->identification_space[120], sizeof(lba28_count));
@@ -416,11 +515,29 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
     }
   }
 
+  /* Weirdly, the ASCII strings in the identification_space are
+     byte-swapped, because it was originally defined as a region of
+     16-bit words (!) */
   fixup_string_endianness(disk->serial_number, sizeof(disk->serial_number));
   fixup_string_endianness(disk->firmware_revision, sizeof(disk->firmware_revision));
   fixup_string_endianness(disk->model, sizeof(disk->model));
 
-  printf("Disk %d:\n", disknum);
+  /* At this point, the disk has identified itself, and it looks
+     more-or-less like the kind of thing we might be able to use. Add
+     it to the list in our controller. */
+  list_insert(list_last(&c->disk_list), &disk->link);
+
+  memcpy(disk->devname, c->devname, 3);
+  disk->devname[3] = 'd';
+  disk->devname[4] = '0' + disknum;
+  disk->devname[5] = '\0';
+  disk->dev = device_create(self, disk->devname, D_BLK | D_PROT);
+  get_handle(disk->dev)->kind = ATA_DEVICE_WHOLEDISK;
+  get_handle(disk->dev)->pointer.wholedisk = disk;
+
+  list_init(&disk->partition_list);
+
+  printf("Disk %d/%s:\n", disknum, disk->devname);
   printf(" - serial %.*s\n", sizeof(disk->serial_number), disk->serial_number);
   printf(" - firmware %.*s\n", sizeof(disk->firmware_revision), disk->firmware_revision);
   printf(" - model %.*s\n", sizeof(disk->model), disk->model);
@@ -429,17 +546,12 @@ static void setup_disk(struct driver *self, struct ata_controller *c, int disknu
 	 (uint32_t) (disk->addressable_sector_count >> 32),
 	 (uint32_t) disk->addressable_sector_count);
 
-  disk->valid = 1;
-
-  /* TODO: register the device for the disk. */
-  memcpy(disk->devname, c->devname, 3);
-  disk->devname[3] = 'd';
-  disk->devname[4] = '0' + disknum;
-  disk->devname[5] = '\0';
-  disk->dev = device_create(self, disk->devname, D_BLK | D_PROT);
-  *((struct ata_disk **) device_private(disk->dev)) = disk;
-
   setup_partitions(self, disk);
+  return 0;
+
+ cancel_setup:
+  kmem_free(disk);
+  return -1;
 }
 
 static void setup_controller(struct driver *self, struct pci_device *v) {
@@ -490,7 +602,6 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   c = kmem_alloc(sizeof(struct ata_controller));
   memcpy(&c->devname[0], &devname_tmp[0], sizeof(c->devname));
   c->pci_dev = v;
-  c->isopen = 0;
 
   irp = &c->irp;
   irp->cmd = IO_NONE;
@@ -509,6 +620,8 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
     /* Tell the controller which IRQ to use, if we're in native mode. */
     write_pci_interrupt_line(v, HDC_IRQ);
   }
+
+  list_init(&c->disk_list); /* no disks yet; will scan in a moment */
 
   c->buffer = ptokv(page_alloc(BUFFER_LENGTH));
 
@@ -575,33 +688,16 @@ static int hdd_init(struct driver *self) {
   return 0;
 }
 
-static struct ata_disk *get_disk(device_t dev) {
-  return * (struct ata_disk **) device_private(dev);
-}
-
 static int hdd_open(device_t dev, int mode) {
-  struct ata_disk *disk = get_disk(dev);
-
-  if (disk->controller->isopen > 0) {
-    return EBUSY;
-  }
-  /* Is this a race? fdd.c does the same thing. */
-  disk->controller->isopen++;
-  disk->controller->irp.cmd = IO_NONE;
+  /* There's nothing needs doing here. The device tree is static after
+     the probe, and we no longer use locking at the device level
+     (locking a request queue, instead). This applies to close etc as
+     well, at least until we get asynchronous requests in Prex. */
   return 0;
 }
 
 static int hdd_close(device_t dev) {
-  struct ata_disk *disk = get_disk(dev);
-
-  if (disk->controller->isopen != 1) {
-    return EINVAL;
-  }
-  /* Is this a race? fdd.c does the same thing. */
-  disk->controller->isopen--;
-  disk->controller->irp.cmd = IO_NONE;
-  /* TODO: reset the controller perhaps? Or shut it down? The fdd
-     driver switches off the drive motor here. */
+  /* See hdd_open's comment. */
   return 0;
 }
 
@@ -631,13 +727,39 @@ static int hdd_rw(struct ata_disk *disk, struct irp *irp, int cmd,
   return err;
 }
 
+static void adjust_blkno(device_t dev,
+			 struct ata_disk **disk_p,
+			 int *blkno_p,
+			 size_t *limit_p)
+{
+  struct ata_device_handle *handle = get_handle(dev);
+  switch (handle->kind) {
+    case ATA_DEVICE_WHOLEDISK:
+      *disk_p = handle->pointer.wholedisk;
+      /* No adjustment to blkno required. */
+      *limit_p = handle->pointer.wholedisk->addressable_sector_count;
+      break;
+
+    case ATA_DEVICE_PARTITION:
+      *disk_p = handle->pointer.partition->disk;
+      *blkno_p += handle->pointer.partition->start_lba;
+      *limit_p = handle->pointer.partition->sector_count;
+      break;
+
+    default:
+      panic("Unknown ata_device_handle kind");
+  }
+}
+
 static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
-  struct ata_disk *disk = get_disk(dev);
+  struct ata_disk *disk = NULL;
   uint8_t *kbuf;
   size_t sector_count = *nbyte / SECTOR_SIZE;
   size_t transferred_total = 0;
+  size_t sector_limit = 0;
 
-  if ((blkno < 0) || (blkno + sector_count >= disk->addressable_sector_count))
+  adjust_blkno(dev, &disk, &blkno, &sector_limit);
+  if ((blkno < 0) || (blkno + sector_count >= sector_limit))
     return EIO;
 
   kbuf = kmem_map(buf, *nbyte);
@@ -674,45 +796,8 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
 }
 
 static int hdd_write(device_t dev, char *buf, size_t *nbyte, int blkno) {
-  struct ata_disk *disk = get_disk(dev);
+  /* TODO: this */
   return EINVAL;
-  /*
-  uint8_t *kbuf;
-  size_t sector_count = *nbyte / SECTOR_SIZE;
-  size_t transferred_total = 0;
-
-  if ((blkno < 0) || (blkno + sector_count >= disk->addressable_sector_count))
-    return EIO;
-
-  kbuf = kmem_map(buf, *nbyte);
-  if (kbuf == NULL)
-    return EFAULT;
-
-  while (sector_count > 0) {
-    size_t transfer_sector_count =
-      (sector_count > BUFFER_LENGTH_IN_SECTORS) ? BUFFER_LENGTH_IN_SECTORS : sector_count;
-    size_t transfer_byte_count = SECTOR_SIZE * transfer_sector_count;
-    int err;
-
-    memcpy(disk->controller->buffer, kbuf, transfer_byte_count);
-
-    err = hdd_rw(disk, &disk->controller->irp, IO_WRITE,
-		 disk->controller->buffer, transfer_sector_count, blkno);
-    if (err) {
-      printf("hdd_write error: %d\n", err);
-      *nbyte = transferred_total;
-      return EIO;
-    }
-
-    transferred_total += transfer_byte_count;
-    kbuf += transfer_byte_count;
-    blkno += transfer_sector_count;
-    sector_count -= transfer_sector_count;
-  }
-
-  *nbyte = transferred_total;
-  return 0;
-  */
 }
 
 static struct devops hdd_devops = {
@@ -727,7 +812,7 @@ static struct devops hdd_devops = {
 struct driver hdd_driver = {
 	/* name */	"hdd",
 	/* devsops */	&hdd_devops,
-	/* devsz */	sizeof(struct ata_disk *),
+	/* devsz */	sizeof(struct ata_device_handle),
 	/* flags */	0,
 	/* probe */	NULL,
 	/* init */	hdd_init,

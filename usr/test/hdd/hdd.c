@@ -37,7 +37,7 @@
 #include <ctype.h>
 
 int
-test_read(int sector)
+test_read(char const *devname, int sector)
 {
         device_t hdd;
         size_t size;
@@ -45,8 +45,8 @@ test_read(int sector)
         static unsigned char disk_buf[512];
         unsigned char ch;
 
-        printf("open hd0d0\n");
-        error = device_open("hd0d0", 0, &hdd);
+        printf("open %s\n", devname);
+        error = device_open(devname, 0, &hdd);
         if (error) {
                 printf("open failed\n");
                 return 0;
@@ -86,15 +86,15 @@ test_read(int sector)
 }
 
 int
-test_write(int sector)
+test_write(char const *devname, int sector)
 {
         device_t hdd;
         size_t size;
         int error;
         static unsigned char disk_buf[512];
 
-        printf("open hd0d0\n");
-        error = device_open("hd0d0", 0, &hdd);
+        printf("open %s\n", devname);
+        error = device_open(devname, 0, &hdd);
         if (error) {
                 printf("open failed\n");
                 return 0;
@@ -128,13 +128,13 @@ test_write(int sector)
 int
 main(int argc, char *argv[])
 {
-        test_read(0);
-        /*
-        test_read(1);
-        test_read(2);
+  test_read("hd0d0", 0);
+  test_read("hd0d0p00", 0);
+  /*
+    test_read("hd0d0", 1);
+    test_read("hd0d0", 2);
 
-        test_write(1);
-        */
-
-        return 0;
+    test_write("hd0d0", 1);
+  */
+  return 0;
 }
