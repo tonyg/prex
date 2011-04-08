@@ -28,6 +28,8 @@ int getfsent(pfstab_traversal trav)
   char *spec = NULL, *type = NULL;
   char *file, *vfstype, *p, *options, line[1024];
 
+  if (trav->fp == NULL)
+    return 0;
   /* Skip non-tokens or comments */
   while(spec == NULL || *spec == '#') {
     if ((p = fgets(line, sizeof(line), trav->fp)) == NULL)

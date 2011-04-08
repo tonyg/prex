@@ -1,4 +1,5 @@
 PROG:=          mount
+SYMBOL:=        mount.sym
 
 SRCS:=          mount
 

@@ -1,6 +1,6 @@
 #include <sys/param.h>
 #include <sys/mount.h>
-#include <sys/sysinfo.h>
+#include <sys/prex.h>
 
 #include <fstab.h>
 #include <stdio.h>
@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-static int      debug, verbose;
+static int      verbose;
 
 static int      hasopt(const char *, const char *);
 static void     usage(void);
@@ -20,7 +20,7 @@ static int mount_on_name(dev_t, char *);
 int
 main(int argc, char *argv[])
 {
-        const char **vfslist, *vfstype;
+        const char **vfslist;
 
         int all, ch, init_flags, rval;
         char options[MAXOPTBUF];
@@ -30,7 +30,9 @@ main(int argc, char *argv[])
         /* started as "mount" */
         all = init_flags = 0;
         vfslist = NULL;
-        while ((ch = getopt(argc, argv, "a:rwt:uv")) != -1)
+        printf("Here\n");
+        while ((ch = getopt(argc, argv, "a:rwt:uv")) != -1) {
+          printf("WTF %d %c\n", argc, ch);
                 switch (ch) {
                 case 'a':
                         all = 1;
@@ -52,6 +54,7 @@ main(int argc, char *argv[])
                         usage();
                         /* NOTREACHED */
                 }
+        }
         argc -= optind;
         argv += optind;
 
@@ -64,7 +67,7 @@ main(int argc, char *argv[])
         case 0:
                 if (all)
                   mountall(init_flags, options, vfslist);
-        
+                break;
                 /* NOTREACHED */
         case 1:
                 if (vfslist != NULL) {
