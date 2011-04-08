@@ -4,13 +4,6 @@ NEXT TO DO
 Test multiple-sector transfers. (Just give up on PIO and implement Bus
 Master DMA?)
 
-Make the device_create()d devices into *partitions* rather than whole
-disks. Perhaps do this by making ata_disk structures kmem_alloc'd, and
-making it a variant union, with variants for
-
-       - whole disks (include model number and stuff)
-       - disk partitions (include offset and length)
-
 Implement hdd_write.
 
 Fix the locking: have a queue of requests that's dealt with by hdd_ist
