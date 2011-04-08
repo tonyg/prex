@@ -130,6 +130,7 @@ main(int argc, char *argv[])
 {
   test_read("hd0d0", 0);
   test_read("hd0d0p00", 0);
+  test_read("hd0d2", 0);
   /*
     test_read("hd0d0", 1);
     test_read("hd0d0", 2);

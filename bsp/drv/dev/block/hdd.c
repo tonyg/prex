@@ -18,8 +18,9 @@ typedef unsigned long long uint64_t; /* Hmm. */
    http://suif.stanford.edu/~csapuntz/specs/idems100.ps
 */
 
-#define HDC_IRQ		14	/* Yeah, there are more than 16 these days.
-				   Does prex support anything more than 16? */
+#define HDC_PRIMARY_IRQ		14	/* Yeah, there are more than 16 these days.
+					   Does prex support anything more than 16? */
+#define HDC_SECONDARY_IRQ	15
 /* In any case, we should be spreading the load around, and not
  * sharing one IRQ for all the IDE controllers in the system. For now,
  * sharing the IRQ is fine.
@@ -164,16 +165,30 @@ struct ata_channel {
 };
 
 /**
+ * A single I/O request in progress. */
+struct hdd_request {
+  enum {
+    REQ_INVALID = 0,
+    REQ_NOT_STARTED,
+    REQ_WAITING_FOR_IO,
+    REQ_COMPLETE /* TODO: do we really need this? */
+  } state;
+  struct ata_disk *disk;
+  struct irp irp;
+  struct queue link; /* link in chain of outstanding I/O requests */
+};
+
+/**
  * Represents a single IDE controller. */
 struct ata_controller {
   char devname[MAXDEVNAME]; /* "hdX\0"; used for debugging etc. */
   struct pci_device *pci_dev; /* the PCI config for this device */
-  struct irp irp; /* TODO: switch to a request queue */
-  struct ata_disk *active_disk; /* disk using the irp right now TODO: switch to a request queue */
+  struct queue request_queue; /* queue of hdd_requests. lock (splhigh) before using this */
+  int disk_active; /* whether any request is outstanding. lock (splhigh) before using this */
   irq_t irq; /* we registered an IRQ with the kernel; this is the handle we were given */
+  irq_t irq_secondary; /* we may have registered an IRQ for the secondary channel too */
   struct ata_channel channel[2]; /* the two channels within the controller */
   struct list disk_list; /* all disks attached to this controller */
-  uint8_t *buffer; /* TODO: switch to a request queue */
 };
 
 #if 0 /* we don't need this yet */
@@ -261,49 +276,9 @@ static void ata_pio_read(struct ata_controller *c,
   }
 }
 
-/* interrupt service routine. Lowest-level responder to an interrupt -
-   try to avoid doing "real work" here */
-static int hdc_isr(void *arg) {
-  struct ata_controller *c = arg;
-  struct ata_disk *disk = c->active_disk;
-  uint8_t status = read_altstatus(c, disk->channel);
-  if (status & (ATA_STATUS_FLAG_DRQ | ATA_STATUS_FLAG_DEVICE_FAILURE | ATA_STATUS_FLAG_ERROR)) {
-    return INT_CONTINUE;
-  } else {
-    return 0;
-  }
-}
-
-/* interrupt service thread. The main workhorse for communicating with
-   the device. */
-static void hdc_ist(void *arg) {
-  struct ata_controller *c = arg;
-  struct ata_disk *disk = c->active_disk;
-  struct irp *irp = &c->irp;
-  uint8_t status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
-
-  c->active_disk = NULL;
-
-  if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
-    irp->error = 0x80000000 | (status << 16) | ata_read(c, disk->channel, ATA_REG_ERR);
-    sched_wakeup(&irp->iocomp);
-    return;
-  }
-
-  irp->error = 0;
-  switch (irp->cmd) {
-    case IO_READ:
-      ata_pio_read(c, disk->channel, irp->buf, irp->blksz * SECTOR_SIZE);
-      break;
-    case IO_WRITE:
-      panic("hdd_ist IO_WRITE not implemented"); /* TODO */
-      /* TODO: add flush-to-disk ioctl? */
-      break;
-    default:
-      panic("hdd_ist invalid irp->cmd");
-      break;
-  }
-  sched_wakeup(&irp->iocomp);
+static struct hdd_request *first_pending_request(struct ata_controller *c) {
+  queue_t q = queue_first(&c->request_queue);
+  return queue_entry(q, struct hdd_request, link);
 }
 
 /* Sends an I/O command to the disk, including the address of the
@@ -316,8 +291,6 @@ static void hdd_setup_io(struct ata_disk *disk,
 {
   struct ata_controller *c = disk->controller;
   uint8_t final_cmd;
-
-  c->active_disk = disk;
 
   switch (cmd) {
     case IO_READ:
@@ -346,6 +319,97 @@ static void hdd_setup_io(struct ata_disk *disk,
 
   /* We'll get an interrupt sometime, if interrupts aren't disabled;
      otherwise, we'll need to check the status register by polling. */
+}
+
+/* CALL ONLY WITH splhigh! */
+static void throck_controller(struct ata_controller *c) {
+  if (!c->disk_active && !queue_empty(&c->request_queue)) {
+    struct hdd_request *req = first_pending_request(c);
+    struct irp *irp = &req->irp;
+
+    ASSERT(req->state == REQ_NOT_STARTED);
+
+    hdd_setup_io(req->disk, irp->cmd, irp->blkno, irp->blksz); /* TODO: 64 bit irp->blkno? */
+    req->state = REQ_WAITING_FOR_IO;
+    c->disk_active = 1;
+  }
+}
+
+/* CALL ONLY WITH splhigh! */
+static void complete_request(struct hdd_request *req) {
+  sched_wakeup(&req->irp.iocomp);
+  queue_remove(&req->link);
+
+  req->disk->controller->disk_active = 0; /* because we've just finished a request. */
+  /* Omitting the previous line would cause throck_controller to
+     happily ignore the remaining elements in the queue. */
+  throck_controller(req->disk->controller);
+
+  req->state = REQ_COMPLETE; /* won't last long, we're about to free it */
+  kmem_free(req);
+}
+
+/* interrupt service routine. Lowest-level responder to an interrupt -
+   try to avoid doing "real work" here */
+static int hdc_isr(void *arg) {
+  /* There's nothing useful we can do in this context. Delay it all
+     for the hdc_ist. We won't miss any interrupts, because the
+     kernel's irq.c maintains istreq, a counter of outstanding
+     interrupts, for each IRQ. */
+  return INT_CONTINUE;
+}
+
+/* interrupt service thread. The main workhorse for communicating with
+   the device. */
+static void hdc_ist(void *arg) {
+  struct ata_controller *c = arg;
+  int s = splhigh();
+
+  if (!c->disk_active) {
+    DPRINTF(("Spurious disk interrupt\n"));
+    splx(s);
+    return;
+  }
+
+  if (queue_empty(&c->request_queue)) {
+    panic("Active without a request in the queue!");
+  }
+
+  /* Here, we know we're supposed to be running, and we also know
+     what we're supposed to be doing. */
+  {
+    struct hdd_request *req = first_pending_request(c);
+    struct ata_disk *disk = req->disk;
+    struct irp *irp = &req->irp;
+    uint8_t status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
+
+    ASSERT(req->state == REQ_WAITING_FOR_IO);
+
+    if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
+      irp->error = 0x80000000 | (status << 16) | ata_read(c, disk->channel, ATA_REG_ERR);
+      complete_request(req);
+    } else if (status & ATA_STATUS_FLAG_BUSY) {
+      /* do nothing. Disk still working on our request. */
+    } else {
+      irp->error = 0;
+      switch (irp->cmd) {
+	case IO_READ:
+	  ata_pio_read(c, disk->channel, irp->buf, irp->blksz * SECTOR_SIZE);
+	  break;
+	case IO_WRITE:
+	  panic("hdd_ist IO_WRITE not implemented"); /* TODO */
+	  /* TODO: add flush-to-disk ioctl? */
+	  break;
+	default:
+	  panic("hdd_ist invalid irp->cmd");
+      }
+      /* TODO: BUG: multiple sector transfers should keep the entry in
+	 the queue until it's completely finished with. */
+      complete_request(req);
+    }
+  }
+
+  splx(s);
 }
 
 /* Useful only from within the kernel, while we're probing and setting
@@ -561,7 +625,6 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   int secondary_native;
 
   struct ata_controller *c;
-  struct irp *irp;
 
   /* According to the "PCI IDE Controller Specification Revision 1.0",
      which I retrieved from
@@ -602,10 +665,8 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   c = kmem_alloc(sizeof(struct ata_controller));
   memcpy(&c->devname[0], &devname_tmp[0], sizeof(c->devname));
   c->pci_dev = v;
-
-  irp = &c->irp;
-  irp->cmd = IO_NONE;
-  event_init(&irp->iocomp, &c->devname[0]);
+  queue_init(&c->request_queue);
+  c->disk_active = 0;
 
   /* TODO: if we're operating in compatibility/legacy mode, we are
      behaving like an old school IDE adapter, which wants to use IRQ14
@@ -614,16 +675,20 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
      work. */
 
   /* TODO: claiming an IRQ more than once causes, um, issues, so don't do that. Ever. */
-  c->irq = irq_attach(HDC_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
+  c->irq = irq_attach(HDC_PRIMARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
+  if (secondary_native) {
+    c->irq_secondary = 0;
+  } else {
+    c->irq_secondary = irq_attach(HDC_SECONDARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
+  }
 
   if (primary_native || secondary_native) {
     /* Tell the controller which IRQ to use, if we're in native mode. */
-    write_pci_interrupt_line(v, HDC_IRQ);
+    /* It's an arbitrary choice between primary and secondary. */
+    write_pci_interrupt_line(v, HDC_PRIMARY_IRQ);
   }
 
   list_init(&c->disk_list); /* no disks yet; will scan in a moment */
-
-  c->buffer = ptokv(page_alloc(BUFFER_LENGTH));
 
   /* TODO: It is unclear whether, in native mode, the BARs contain
      port numbers directly, or whether they should be masked with
@@ -701,26 +766,34 @@ static int hdd_close(device_t dev) {
   return 0;
 }
 
-static int hdd_rw(struct ata_disk *disk, struct irp *irp, int cmd,
-		  uint8_t *buf, size_t block_count, int blkno)
+static int hdd_rw(struct ata_disk *disk, int cmd, uint8_t *buf, size_t block_count, int blkno)
 {
+  struct hdd_request *req = kmem_alloc(sizeof(struct hdd_request));
   int err;
 
-  irp->cmd = cmd;
-  irp->ntries = 0;
-  irp->error = 0;
-  irp->blkno = blkno;
-  irp->blksz = block_count;
-  irp->buf = buf;
+  req->state = REQ_NOT_STARTED;
+  req->disk = disk;
+  req->irp.cmd = cmd;
+  req->irp.ntries = 0;
+  req->irp.error = 0;
+  req->irp.blkno = blkno;
+  req->irp.blksz = block_count;
+  req->irp.buf = buf;
+  event_init(&req->irp.iocomp, "hdd_rw");
 
   sched_lock();
 
-  hdd_setup_io(disk, irp->cmd, irp->blkno, irp->blksz); /* TODO: 64 bit irp->blkno? */
+  {
+    int s = splhigh();
+    enqueue(&disk->controller->request_queue, &req->link);
+    throck_controller(disk->controller);
+    splx(s);
+  }
 
-  if (sched_sleep(&irp->iocomp) == SLP_INTR) {
+  if (sched_sleep(&req->irp.iocomp) == SLP_INTR) {
     err = EINTR;
   } else {
-    err = irp->error;
+    err = req->irp.error;
   }
   sched_unlock();
 
@@ -775,15 +848,12 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
     size_t transfer_byte_count = SECTOR_SIZE * transfer_sector_count;
     int err;
 
-    err = hdd_rw(disk, &disk->controller->irp, IO_READ,
-		 disk->controller->buffer, transfer_sector_count, blkno);
+    err = hdd_rw(disk, IO_READ, kbuf, transfer_sector_count, blkno);
     if (err) {
       printf("hdd_read error: %d\n", err);
       *nbyte = transferred_total;
       return EIO;
     }
-
-    memcpy(kbuf, disk->controller->buffer, transfer_byte_count);
 
     transferred_total += transfer_byte_count;
     kbuf += transfer_byte_count;

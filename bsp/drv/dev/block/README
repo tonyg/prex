@@ -5,7 +5,3 @@ Test multiple-sector transfers. (Just give up on PIO and implement Bus
 Master DMA?)
 
 Implement hdd_write.
-
-Fix the locking: have a queue of requests that's dealt with by hdd_ist
-and so forth. Buffering will need to be dealt with, too. Bus Master
-DMA will make the buffering situation a little easier.
