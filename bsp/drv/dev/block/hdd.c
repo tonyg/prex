@@ -247,9 +247,8 @@ static void ata_delay400(struct ata_controller *c, int channelnum) {
 static void ata_wait(struct ata_controller *c, int channelnum) {
   unsigned int i;
 
-  ata_delay400(c, channelnum);
-
-  for (i = 0; i < 0x80000000; i++) {
+  /* TODO: find out whether one I/O port read is roughly one microsecond. */
+  for (i = 0; i < 1000000 /* 1 second? */ ; i++) {
     if (!(read_altstatus(c, channelnum) & ATA_STATUS_FLAG_BUSY)) {
       return;
     }
@@ -309,6 +308,8 @@ static void hdd_setup_io(struct ata_disk *disk,
       return;
   }
 
+  /* DPRINTF(("%08x Send cmd %d lba %d\n", timer_ticks(), cmd, (int) lba)); */
+
   ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, (sector_count >> 8) & 0xff);
   ata_write(c, disk->channel, ATA_REG_LBA_LOW, (lba >> 24) & 0xff);
   ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 32) & 0xff);
@@ -331,7 +332,7 @@ static void timeout_handler(void *arg) {
 }
 
 /* CALL ONLY WITH splhigh! */
-static void throck_controller(struct ata_controller *c) {
+static void maybe_send_next_request(struct ata_controller *c) {
   if (!c->disk_active && !queue_empty(&c->request_queue)) {
     struct hdd_request *req = first_pending_request(c);
     struct irp *irp = &req->irp;
@@ -353,9 +354,9 @@ static void complete_request(struct hdd_request *req) {
   queue_remove(&req->link);
 
   req->disk->controller->disk_active = 0; /* because we've just finished a request. */
-  /* Omitting the previous line would cause throck_controller to
+  /* Omitting the previous line would cause maybe_send_next_request to
      happily ignore the remaining elements in the queue. */
-  throck_controller(req->disk->controller);
+  maybe_send_next_request(req->disk->controller);
 
   req->state = REQ_COMPLETE; /* won't last long, we're about to free it */
   kmem_free(req);
@@ -373,39 +374,67 @@ static int hdc_isr(void *arg) {
   return INT_CONTINUE;
 }
 
+/* Called from the interrupt service thread, with interrupts
+   DISABLED. Returns 0 for success, nonzero error code otherwise. */
+static int wait_for_drq(struct ata_controller *c, int channel) {
+  /* First, properly read-and-clear the status flags. */
+  uint8_t status = ata_read(c, channel, ATA_REG_COMMAND_STATUS);
+  int i;
+
+  /* Wait a while for DRQ to become set. If we see ERROR, give
+     up. After that initial read of the real status register, read
+     altstatus instead, because we don't want to clear any other
+     pending interrupt. */
+  for (i = 0; i < 50; i++) {
+    if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
+      return 0x80000000 | (status << 16) | ata_read(c, channel, ATA_REG_ERR);
+    }
+    if (status & ATA_STATUS_FLAG_DRQ) {
+      return 0;
+    }
+    status = read_altstatus(c, channel);
+  }
+
+  /* DRQ never got set. */
+  return 0xC0000000 | (status << 16);
+}
+
 /* interrupt service thread. The main workhorse for communicating with
    the device. */
 static void hdc_ist(void *arg) {
   struct ata_controller *c = arg;
   int s = splhigh();
 
+  /* Don't return from this function without calling splx(s). */
+
   if (!c->disk_active) {
-    DPRINTF(("Spurious disk interrupt\n"));
-    splx(s);
-    return;
-  }
-
-  if (queue_empty(&c->request_queue)) {
+    /* Nothing's happening, in theory! Read the real status registers
+       to permit subsequent interrupts to fire. */
+    ata_read(c, 0, ATA_REG_COMMAND_STATUS);
+    ata_read(c, 1, ATA_REG_COMMAND_STATUS);
+    /* DPRINTF(("%08x Spurious disk interrupt\n")); */
+  } else if (queue_empty(&c->request_queue)) {
     panic("Active without a request in the queue!");
-  }
-
-  /* Here, we know we're supposed to be running, and we also know
-     what we're supposed to be doing. */
-  {
+  } else {
+    /* Here, we know we're supposed to be running, and we also know
+       what we're supposed to be doing. */
     struct hdd_request *req = first_pending_request(c);
     struct ata_disk *disk = req->disk;
     struct irp *irp = &req->irp;
-    uint8_t status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
 
     ASSERT(req->state == REQ_WAITING_FOR_IO);
 
-    if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
-      irp->error = 0x80000000 | (status << 16) | ata_read(c, disk->channel, ATA_REG_ERR);
-      complete_request(req);
-    } else if (status & ATA_STATUS_FLAG_BUSY) {
-      /* do nothing. Disk still working on our request. */
-    } else {
-      irp->error = 0;
+    /* DPRINTF(("%08x ist cmd %d\n", timer_ticks(), irp->cmd)); */
+
+    /* Wait for BUSY to clear, if it's set. */
+    ata_wait(c, disk->channel);
+
+    /* Wait for DRQ, and check for errors. */
+    irp->error = wait_for_drq(c, disk->channel);
+
+    /* If successful, do the transfer. Otherwise complete the request
+       without doing anything more. */
+    if (irp->error == 0) {
       switch (irp->cmd) {
 	case IO_READ:
 	  ata_pio_read(c, disk->channel, irp->buf, irp->blksz * SECTOR_SIZE);
@@ -417,10 +446,14 @@ static void hdc_ist(void *arg) {
 	default:
 	  panic("hdd_ist invalid irp->cmd");
       }
-      /* TODO: BUG: multiple sector transfers should keep the entry in
-	 the queue until it's completely finished with. */
-      complete_request(req);
     }
+
+    /* TODO: BUG?: how are multiple sector transfers supposed to work?
+       Is the disk supposed to buffer everything and supply a single
+       interrupt, or is there an interrupt per sector? If the latter,
+       we should keep the entry in the queue until it's completely
+       finished with! */
+    complete_request(req);
   }
 
   splx(s);
@@ -432,6 +465,7 @@ static int read_during_setup(struct ata_disk *disk, uint64_t lba, uint8_t *buf, 
   struct ata_controller *c = disk->controller;
   int status;
   hdd_setup_io(disk, IO_READ, lba, count);
+  ata_delay400(c, disk->channel);
   ata_wait(c, disk->channel);
   status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
   if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
@@ -549,6 +583,7 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
     goto cancel_setup;
   }
 
+  ata_delay400(c, disk->channel);
   ata_wait(c, disk->channel);
   if (read_altstatus(c, disk->channel) & ATA_STATUS_FLAG_ERROR) {
     printf("Disk %d absent (wouldn't identify).\n", disknum);
@@ -800,7 +835,7 @@ static int hdd_rw(struct ata_disk *disk, int cmd, uint8_t *buf, size_t block_cou
   {
     int s = splhigh();
     enqueue(&disk->controller->request_queue, &req->link);
-    throck_controller(disk->controller);
+    maybe_send_next_request(disk->controller);
     splx(s);
   }
 
