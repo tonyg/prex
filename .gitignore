@@ -28,6 +28,7 @@ usr/sbin/lock/lock
 usr/sbin/mkdosfs/mkdosfs
 usr/sbin/mount/mount
 usr/sbin/pmctrl/pmctrl
+usr/sbin/wparttab/wparttab
 usr/server/boot/boot
 usr/server/exec/exec
 usr/server/fs/fs

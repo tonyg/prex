@@ -44,6 +44,10 @@ ifeq ($(CONFIG_CMD_MKDOSFS),y)
 FILES+= 	$(SRCDIR)/usr/sbin/mkdosfs/mkdosfs
 endif
 
+ifeq ($(CONFIG_CMD_WPARTTAB),y)
+FILES+= 	$(SRCDIR)/usr/sbin/wparttab/wparttab
+endif
+
 ifneq ($(_QUICK_),1)
 ifneq ($(CONFIG_TINY),y)
 FILES+=		$(SRCDIR)/usr/sample/hello/hello

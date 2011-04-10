@@ -143,3 +143,4 @@ command 	lock
 command 	debug
 command		mount
 command		mkdosfs
+command		wparttab
