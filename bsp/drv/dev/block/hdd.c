@@ -865,7 +865,7 @@ static void adjust_blkno(device_t dev,
     case ATA_DEVICE_PARTITION:
       *disk_p = handle->pointer.partition->disk;
       *blkno_p += handle->pointer.partition->start_lba;
-      *limit_p = handle->pointer.partition->sector_count;
+      *limit_p = handle->pointer.partition->start_lba + handle->pointer.partition->sector_count;
       break;
 
     default:
@@ -878,10 +878,12 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
   uint8_t *kbuf;
   size_t sector_count = *nbyte / SECTOR_SIZE;
   size_t transferred_total = 0;
-  size_t sector_limit = 0;
+  size_t sector_limit = 0; /* number of first invalid sector */
 
+  /* DPRINTF(("Pre adjustment: %08x count %d (%d bytes)\n", blkno, sector_count, *nbyte)); */
   adjust_blkno(dev, &disk, &blkno, &sector_limit);
-  if ((blkno < 0) || (blkno + sector_count >= sector_limit))
+  /* DPRINTF(("Post adjustment: %08x limit %08x\n", blkno, sector_limit)); */
+  if ((blkno < 0) || (blkno + sector_count > sector_limit))
     return EIO;
 
   kbuf = kmem_map(buf, *nbyte);
