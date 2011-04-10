@@ -12,3 +12,4 @@ none		/mnt/fifo	fifofs
 #/dev/mtd1	/etc		ffs
 #/dev/cdrom0	/mnt/cdrom	isofs
 #none		/private	cryptfs
+/dev/hd0d0p00	/mnt/hdd	fatfs
