@@ -1,7 +1,4 @@
 NEXT TO DO
 ---------------------------------------------------------------------------
 
-Test multiple-sector transfers. (Just give up on PIO and implement Bus
-Master DMA?)
-
 Implement hdd_write.
