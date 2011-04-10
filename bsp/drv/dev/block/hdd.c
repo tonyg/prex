@@ -87,9 +87,9 @@ typedef enum ata_status_flag_t_ {
 #endif
 
 /* At present, we limit individual transfers to a maximum of
-   BUFFER_LENGTH bytes. TODO: once we have a request queue, this will
-   probably become obsolete. Doubly so once we switch to DMA. */
-#define BUFFER_LENGTH 65536 /* FIXME: proper caching please */
+   BUFFER_LENGTH bytes. TODO: once we switch to DMA, this will
+   probably become obsolete. */
+#define BUFFER_LENGTH 65536
 #define BUFFER_LENGTH_IN_SECTORS (BUFFER_LENGTH / SECTOR_SIZE)
 
 /**
@@ -171,7 +171,7 @@ struct hdd_request {
   enum {
     REQ_INVALID = 0,
     REQ_NOT_STARTED,
-    REQ_WAITING_FOR_IO,
+    REQ_WAITING_FOR_DEVICE,
     REQ_COMPLETE /* TODO: do we really need this? */
   } state;
   struct ata_disk *disk;
@@ -277,6 +277,25 @@ static void ata_pio_read(struct ata_controller *c,
   }
 }
 
+/* Programmed I/O (PIO) write a buffer's worth of data to the controller. */
+static void ata_pio_write(struct ata_controller *c,
+			  int channelnum,
+			  uint8_t *buffer,
+			  size_t count)
+{
+  ASSERT((count & 3) == 0); /* multiple of 4 bytes. */
+  while (count > 0) {
+    uint32_t v =
+      buffer[0]
+      | (buffer[1] << 8)
+      | (buffer[2] << 16)
+      | (buffer[3] << 24);
+    bus_write_32(c->channel[channelnum].base_port + ATA_REG_DATA, v);
+    buffer += 4;
+    count -= 4;
+  }
+}
+
 static struct hdd_request *first_pending_request(struct ata_controller *c) {
   queue_t q = queue_first(&c->request_queue);
   return queue_entry(q, struct hdd_request, link);
@@ -300,8 +319,9 @@ static void hdd_setup_io(struct ata_disk *disk,
       final_cmd = 0x24;
       break;
     case IO_WRITE:
-      panic("hdd_setup_io IO_WRITE not implemented"); /* TODO */
-      final_cmd = 0; /* TODO */
+      /* Send WRITE SECTORS EXT command. */
+      ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
+      final_cmd = 0x34;
       break;
     default:
       panic("hdd_setup_io invalid cmd");
@@ -322,6 +342,15 @@ static void hdd_setup_io(struct ata_disk *disk,
 
   /* We'll get an interrupt sometime, if interrupts aren't disabled;
      otherwise, we'll need to check the status register by polling. */
+
+  /* PIO writes should happen here. The IRQ will signal that the drive
+     has accepted a sector's worth, not that it wants a sector's
+     worth.
+
+     According to http://wiki.osdev.org/ATA_PIO_Mode#28_bit_PIO, after
+     transferring a sector's worth of data, one should "loop back to
+     waiting for the next IRQ (or poll again -- see next note) for
+     each successive sector." */
 }
 
 static void hdc_ist(void *arg); /* prototype, because referenced in timeout_handler. */
@@ -340,7 +369,12 @@ static void maybe_send_next_request(struct ata_controller *c) {
     ASSERT(req->state == REQ_NOT_STARTED);
 
     hdd_setup_io(req->disk, irp->cmd, irp->blkno, irp->blksz); /* TODO: 64 bit irp->blkno? */
-    req->state = REQ_WAITING_FOR_IO;
+    if (irp->cmd == IO_WRITE) {
+      ata_wait(c, req->disk->channel);
+      ata_pio_write(c, req->disk->channel, irp->buf, SECTOR_SIZE);
+      /* Adjust buf and blksz in the interrupt handler. */
+    }
+    req->state = REQ_WAITING_FOR_DEVICE;
     c->disk_active = 1;
 
     /* We call the ist handler directly on timeout (!) */
@@ -374,25 +408,25 @@ static int hdc_isr(void *arg) {
   return INT_CONTINUE;
 }
 
-/* Called from the interrupt service thread, with interrupts
-   DISABLED. Returns 0 for success, nonzero error code otherwise. */
+static int irp_error(struct ata_controller *c, int channel, uint8_t status) {
+  return 0x80000000 | (status << 16) | ata_read(c, channel, ATA_REG_ERR);
+}
+
+/* Wait a while for DRQ to become set. If we see ERROR, give up. Read
+   altstatus to avoid clearing any pending interrupt. Returns 0 for
+   success, nonzero error code otherwise. */
 static int wait_for_drq(struct ata_controller *c, int channel) {
-  /* First, properly read-and-clear the status flags. */
-  uint8_t status = ata_read(c, channel, ATA_REG_COMMAND_STATUS);
+  uint8_t status = 0;
   int i;
 
-  /* Wait a while for DRQ to become set. If we see ERROR, give
-     up. After that initial read of the real status register, read
-     altstatus instead, because we don't want to clear any other
-     pending interrupt. */
   for (i = 0; i < 50; i++) {
+    status = read_altstatus(c, channel);
     if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
-      return 0x80000000 | (status << 16) | ata_read(c, channel, ATA_REG_ERR);
+      return irp_error(c, channel, status);
     }
     if (status & ATA_STATUS_FLAG_DRQ) {
       return 0;
     }
-    status = read_altstatus(c, channel);
   }
 
   /* DRQ never got set. */
@@ -410,9 +444,19 @@ static void hdc_ist(void *arg) {
   if (!c->disk_active) {
     /* Nothing's happening, in theory! Read the real status registers
        to permit subsequent interrupts to fire. */
+#if DEBUG_HDD
+    uint8_t status0 = ata_read(c, 0, ATA_REG_COMMAND_STATUS);
+    uint8_t status1 = ata_read(c, 1, ATA_REG_COMMAND_STATUS);
+    if ((status0 & (ATA_STATUS_FLAG_DRQ | ATA_STATUS_FLAG_ERROR)) ||
+	(status1 & (ATA_STATUS_FLAG_DRQ | ATA_STATUS_FLAG_ERROR)))
+      {
+	DPRINTF(("%08x Spurious disk interrupt (0x%02x, 0x%02x)\n",
+		 timer_ticks(), status0, status1));
+      }
+#else
     ata_read(c, 0, ATA_REG_COMMAND_STATUS);
     ata_read(c, 1, ATA_REG_COMMAND_STATUS);
-    /* DPRINTF(("%08x Spurious disk interrupt\n")); */
+#endif
   } else if (queue_empty(&c->request_queue)) {
     panic("Active without a request in the queue!");
   } else {
@@ -421,39 +465,63 @@ static void hdc_ist(void *arg) {
     struct hdd_request *req = first_pending_request(c);
     struct ata_disk *disk = req->disk;
     struct irp *irp = &req->irp;
+    uint8_t status;
 
-    ASSERT(req->state == REQ_WAITING_FOR_IO);
+    ASSERT(req->state == REQ_WAITING_FOR_DEVICE);
 
     /* DPRINTF(("%08x ist cmd %d\n", timer_ticks(), irp->cmd)); */
 
     /* Wait for BUSY to clear, if it's set. */
     ata_wait(c, disk->channel);
 
-    /* Wait for DRQ, and check for errors. */
-    irp->error = wait_for_drq(c, disk->channel);
+    /* Now, properly read-and-clear the status flags. */
+    status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
+    /* DPRINTF(("Initial status %02x\n", status)); */
 
     /* If successful, do the transfer. Otherwise complete the request
        without doing anything more. */
-    if (irp->error == 0) {
+    if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
+      irp->error = irp_error(c, disk->channel, status);
+      complete_request(req);
+    } else {
       switch (irp->cmd) {
 	case IO_READ:
-	  ata_pio_read(c, disk->channel, irp->buf, irp->blksz * SECTOR_SIZE);
+	  /* Wait for DRQ, and check for errors. */
+	  irp->error = wait_for_drq(c, disk->channel);
+	  if (irp->error) {
+	    complete_request(req);
+	  } else {
+	    ata_pio_read(c, disk->channel, irp->buf, SECTOR_SIZE);
+	    irp->buf = ((char *) irp->buf) + SECTOR_SIZE;
+	    irp->blksz--;
+	  }
 	  break;
+
 	case IO_WRITE:
-	  panic("hdd_ist IO_WRITE not implemented"); /* TODO */
+	  irp->buf = ((char *) irp->buf) + SECTOR_SIZE;
+	  irp->blksz--;
+	  if (irp->blksz > 0) {
+	    irp->error = wait_for_drq(c, disk->channel);
+	    if (irp->error) {
+	      complete_request(req);
+	    } else {
+	      ata_pio_write(c, disk->channel, irp->buf, SECTOR_SIZE);
+	    }
+	  }
 	  /* TODO: add flush-to-disk ioctl? */
 	  break;
+
 	default:
 	  panic("hdd_ist invalid irp->cmd");
       }
-    }
 
-    /* TODO: BUG?: how are multiple sector transfers supposed to work?
-       Is the disk supposed to buffer everything and supply a single
-       interrupt, or is there an interrupt per sector? If the latter,
-       we should keep the entry in the queue until it's completely
-       finished with! */
-    complete_request(req);
+      /* Multiple sector transfers are supposed to send an interrupt
+	 FOR EACH SECTOR, so we should keep the entry in the queue
+	 until it's completely finished with. */
+      if (irp->blksz == 0) {
+	complete_request(req);
+      }
+    }
   }
 
   splx(s);
@@ -880,9 +948,9 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
   size_t transferred_total = 0;
   size_t sector_limit = 0; /* number of first invalid sector */
 
-  /* DPRINTF(("Pre adjustment: %08x count %d (%d bytes)\n", blkno, sector_count, *nbyte)); */
+  /* DPRINTF(("R Pre adjustment: %08x count %d (%d bytes)\n", blkno, sector_count, *nbyte)); */
   adjust_blkno(dev, &disk, &blkno, &sector_limit);
-  /* DPRINTF(("Post adjustment: %08x limit %08x\n", blkno, sector_limit)); */
+  /* DPRINTF(("R Post adjustment: %08x limit %08x\n", blkno, sector_limit)); */
   if ((blkno < 0) || (blkno + sector_count > sector_limit))
     return EIO;
 
@@ -901,7 +969,7 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
 
     err = hdd_rw(disk, IO_READ, kbuf, transfer_sector_count, blkno);
     if (err) {
-      printf("hdd_read error: %d\n", err);
+      printf("hdd_read error: 0x%08x\n", err);
       *nbyte = transferred_total;
       return EIO;
     }
@@ -917,8 +985,46 @@ static int hdd_read(device_t dev, char *buf, size_t *nbyte, int blkno) {
 }
 
 static int hdd_write(device_t dev, char *buf, size_t *nbyte, int blkno) {
-  /* TODO: this */
-  return EINVAL;
+  struct ata_disk *disk = NULL;
+  uint8_t *kbuf;
+  size_t sector_count = *nbyte / SECTOR_SIZE;
+  size_t transferred_total = 0;
+  size_t sector_limit = 0; /* number of first invalid sector */
+
+  /* DPRINTF(("W Pre adjustment: %08x count %d (%d bytes)\n", blkno, sector_count, *nbyte)); */
+  adjust_blkno(dev, &disk, &blkno, &sector_limit);
+  /* DPRINTF(("W Post adjustment: %08x limit %08x\n", blkno, sector_limit)); */
+  if ((blkno < 0) || (blkno + sector_count > sector_limit))
+    return EIO;
+
+  kbuf = kmem_map(buf, *nbyte);
+  if (kbuf == NULL)
+    return EFAULT;
+  /* TODO: same kmem_map caveat as for hdd_read */
+
+  /* printf("total of %d sectors to write starting at %d\n", sector_count, blkno); */
+  while (sector_count > 0) {
+    size_t transfer_sector_count =
+      (sector_count > BUFFER_LENGTH_IN_SECTORS) ? BUFFER_LENGTH_IN_SECTORS : sector_count;
+    size_t transfer_byte_count = SECTOR_SIZE * transfer_sector_count;
+    int err;
+
+    /* printf("about to write %d sectors at blkno %d\n", transfer_sector_count, blkno); */
+    err = hdd_rw(disk, IO_WRITE, kbuf, transfer_sector_count, blkno);
+    if (err) {
+      printf("hdd_write error: 0x%08x\n", err);
+      *nbyte = transferred_total;
+      return EIO;
+    }
+
+    transferred_total += transfer_byte_count;
+    kbuf += transfer_byte_count;
+    blkno += transfer_sector_count;
+    sector_count -= transfer_sector_count;
+  }
+
+  *nbyte = transferred_total;
+  return 0;
 }
 
 static struct devops hdd_devops = {

@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <assert.h>
 
 int
 test_read(char const *devname, int sector)
@@ -92,6 +93,9 @@ test_write(char const *devname, int sector)
         size_t size;
         int error;
         static unsigned char disk_buf[512];
+        static unsigned char readback_buf[512];
+
+	assert(sizeof(disk_buf) == sizeof(readback_buf));
 
         printf("open %s\n", devname);
         error = device_open(devname, 0, &hdd);
@@ -113,11 +117,27 @@ test_write(char const *devname, int sector)
         size = sizeof(disk_buf);
         error = device_write(hdd, disk_buf, &size, sector);
         if (error) {
-                printf("write failed\n");
+		printf("write failed: %s\n", strerror(error));
                 device_close(hdd);
                 return 0;
         }
         printf("write comp sector=%d\n", sector);
+
+	size = sizeof(readback_buf);
+	error = device_read(hdd, readback_buf, &size, sector);
+	if (error) {
+		printf("readback failed\n");
+		device_close(hdd);
+		return 0;
+	}
+	printf("readback comp sector=%d\n", sector);
+
+	if (memcmp(disk_buf, readback_buf, sizeof(disk_buf)) != 0) {
+		printf("readback comparison failed\n");
+		device_close(hdd);
+		return 0;
+	}
+	printf("readback comparison OK\n");
 
         error = device_close(hdd);
         if (error)
@@ -135,7 +155,7 @@ main(int argc, char *argv[])
     test_read("hd0d0", 1);
     test_read("hd0d0", 2);
 
-    test_write("hd0d0", 1);
   */
+  test_write("hd0d0", 0);
   return 0;
 }
