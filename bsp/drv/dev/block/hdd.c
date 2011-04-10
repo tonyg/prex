@@ -188,6 +188,7 @@ struct ata_controller {
   int disk_active; /* whether any request is outstanding. lock (splhigh) before using this */
   irq_t irq; /* we registered an IRQ with the kernel; this is the handle we were given */
   irq_t irq_secondary; /* we may have registered an IRQ for the secondary channel too */
+  timer_t tmr; /* timeout timer id */
   struct ata_channel channel[2]; /* the two channels within the controller */
   struct list disk_list; /* all disks attached to this controller */
 };
@@ -322,6 +323,13 @@ static void hdd_setup_io(struct ata_disk *disk,
      otherwise, we'll need to check the status register by polling. */
 }
 
+static void hdc_ist(void *arg); /* prototype, because referenced in timeout_handler. */
+
+static void timeout_handler(void *arg) {
+  DPRINTF(("%08x hdd timeout!\n", timer_ticks()));
+  hdc_ist(arg);
+}
+
 /* CALL ONLY WITH splhigh! */
 static void throck_controller(struct ata_controller *c) {
   if (!c->disk_active && !queue_empty(&c->request_queue)) {
@@ -333,6 +341,9 @@ static void throck_controller(struct ata_controller *c) {
     hdd_setup_io(req->disk, irp->cmd, irp->blkno, irp->blksz); /* TODO: 64 bit irp->blkno? */
     req->state = REQ_WAITING_FOR_IO;
     c->disk_active = 1;
+
+    /* We call the ist handler directly on timeout (!) */
+    timer_callout(&c->tmr, 1000, timeout_handler, c);
   }
 }
 
@@ -357,6 +368,8 @@ static int hdc_isr(void *arg) {
      for the hdc_ist. We won't miss any interrupts, because the
      kernel's irq.c maintains istreq, a counter of outstanding
      interrupts, for each IRQ. */
+  struct ata_controller *c = arg;
+  timer_stop(&c->tmr);
   return INT_CONTINUE;
 }
 
