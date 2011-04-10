@@ -42,7 +42,7 @@ test_read(char const *devname, int sector)
         device_t hdd;
         size_t size;
         int error, i, j;
-        static unsigned char disk_buf[512];
+        static unsigned char disk_buf[1024];
         unsigned char ch;
 
         printf("open %s\n", devname);
@@ -54,7 +54,7 @@ test_read(char const *devname, int sector)
         printf("opened\n");
 
         printf("hdd read: sector=%d buf=%x\n", sector, (u_int)disk_buf);
-        size = 512;
+        size = sizeof(disk_buf);
         error = device_read(hdd, disk_buf, &size, sector);
         if (error) {
                 printf("read failed\n");
@@ -63,7 +63,7 @@ test_read(char const *devname, int sector)
         }
         printf("read comp: sector=%d buf=%x\n", sector, (u_int)disk_buf);
 
-        for (i = 0; i < (512 / 16); i++) {
+        for (i = 0; i < (sizeof(disk_buf) / 16); i++) {
                 for (j = 0; j < 16; j++)
                         printf("%02x ", disk_buf[i * 16 + j]);
                 printf("    ");
@@ -101,7 +101,7 @@ test_write(char const *devname, int sector)
         }
         printf("opened\n");
 
-        size = 512;
+        size = sizeof(disk_buf);
         error = device_read(hdd, disk_buf, &size, sector);
         if (error) {
                 printf("read failed\n");
@@ -110,7 +110,7 @@ test_write(char const *devname, int sector)
         }
         printf("read comp sector=%d\n", sector);
 
-        size = 512;
+        size = sizeof(disk_buf);
         error = device_write(hdd, disk_buf, &size, sector);
         if (error) {
                 printf("write failed\n");
