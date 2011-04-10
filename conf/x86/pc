@@ -142,3 +142,4 @@ command 	ktrace
 command 	lock
 command 	debug
 command		mount
+command		mkdosfs

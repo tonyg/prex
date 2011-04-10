@@ -25,6 +25,7 @@ usr/sbin/init/init
 usr/sbin/install/install
 usr/sbin/ktrace/ktrace
 usr/sbin/lock/lock
+usr/sbin/mkdosfs/mkdosfs
 usr/sbin/mount/mount
 usr/sbin/pmctrl/pmctrl
 usr/server/boot/boot
