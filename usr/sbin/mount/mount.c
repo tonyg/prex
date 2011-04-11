@@ -30,9 +30,7 @@ main(int argc, char *argv[])
         /* started as "mount" */
         all = init_flags = 0;
         vfslist = NULL;
-        printf("Here\n");
         while ((ch = getopt(argc, argv, "a:rwt:uv")) != -1) {
-          printf("WTF %d %c\n", argc, ch);
                 switch (ch) {
                 case 'a':
                         all = 1;
