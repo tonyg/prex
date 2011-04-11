@@ -23,8 +23,8 @@ main(int argc, char *argv[])
         const char **vfslist;
 
         int all, ch, init_flags, rval;
-        char options[MAXOPTBUF];
-        char canonical_path_buf[MAXPATHLEN];
+        static char options[MAXOPTBUF];
+        static char canonical_path_buf[MAXPATHLEN];
         char *canonical_path;
 
         /* started as "mount" */
