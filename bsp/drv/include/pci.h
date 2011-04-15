@@ -97,9 +97,11 @@ extern void write_pci16(struct pci_device *v, int offset, uint16_t val);
 extern void write_pci8(struct pci_device *v, int offset, uint8_t val);
 
 extern uint8_t read_pci_interrupt_line(struct pci_device *v);
-extern uint32_t read_pci_bar(struct pci_device *v, int bar_number);
+extern uint32_t read_pci_raw_bar(struct pci_device *v, int bar_number);
+extern uint32_t read_pci_io_bar(struct pci_device *v, int bar_number);
 
 extern void write_pci_interrupt_line(struct pci_device *v, int irqno);
-extern void write_pci_bar(struct pci_device *v, int bar_number, uint32_t val);
+extern void write_pci_raw_bar(struct pci_device *v, int bar_number, uint32_t val);
+extern void write_pci_io_bar(struct pci_device *v, int bar_number, uint32_t val);
 
 #endif

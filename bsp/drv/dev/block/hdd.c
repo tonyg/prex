@@ -921,13 +921,9 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
 
   list_init(&c->disk_list); /* no disks yet; will scan in a moment */
 
-  /* TODO: It is unclear whether, in native mode, the BARs contain
-     port numbers directly, or whether they should be masked with
-     ~0x03. The low two bits might be used as flags?? */
-
   if (primary_native) {
-    c->channel[0].base_port = read_pci_bar(v, 0);
-    c->channel[0].control_port = read_pci_bar(v, 1) + 2;
+    c->channel[0].base_port = read_pci_io_bar(v, 0);
+    c->channel[0].control_port = read_pci_io_bar(v, 1) + 2;
   } else {
     c->channel[0].base_port = ATA_LEGACY_PRIMARY_CONTROL_BASE;
     c->channel[0].control_port =
@@ -935,8 +931,8 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   }
 
   if (secondary_native) {
-    c->channel[1].base_port = read_pci_bar(v, 2);
-    c->channel[1].control_port = read_pci_bar(v, 3) + 2;
+    c->channel[1].base_port = read_pci_io_bar(v, 2);
+    c->channel[1].control_port = read_pci_io_bar(v, 3) + 2;
   } else {
     c->channel[1].base_port = ATA_LEGACY_SECONDARY_CONTROL_BASE;
     c->channel[1].control_port =
@@ -946,7 +942,7 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   /* BAR4 points to a 16-byte block of I/O port space, the low 8 bytes
      of which are for the primary and the high 8 bytes for the
      secondary controller. */
-  c->channel[0].dma_port = read_pci_bar(v, 4);
+  c->channel[0].dma_port = read_pci_io_bar(v, 4);
   c->channel[1].dma_port = c->channel[0].dma_port + 8;
 
   printf(" - pri 0x%04x/0x%04x/0x%04x, sec 0x%04x/0x%04x/0x%04x\n",

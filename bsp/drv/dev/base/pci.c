@@ -103,14 +103,23 @@ void write_pci_interrupt_line(struct pci_device *v, int irqno) {
   write_pci8(v, PCI_REGISTER_INTERRUPT_LINE, irqno);
 }
 
-uint32_t read_pci_bar(struct pci_device *v, int bar_number) {
+uint32_t read_pci_raw_bar(struct pci_device *v, int bar_number) {
   ASSERT(bar_number >= 0 && bar_number < N_PCI_BASE_ADDRESS_REGISTERS);
   return read_pci32(v, PCI_REGISTER_BAR0 + bar_number * 4);
 }
 
-void write_pci_bar(struct pci_device *v, int bar_number, uint32_t val) {
+void write_pci_raw_bar(struct pci_device *v, int bar_number, uint32_t val) {
   ASSERT(bar_number >= 0 && bar_number < N_PCI_BASE_ADDRESS_REGISTERS);
   write_pci32(v, PCI_REGISTER_BAR0 + bar_number * 4, val);
+}
+
+/* IO BARs have their low bit set; Memory BARs have their low bit clear.
+   See http://wiki.osdev.org/PCI */
+uint32_t read_pci_io_bar(struct pci_device *v, int bar_number) {
+  return read_pci_raw_bar(v, bar_number) & (~0x3);
+}
+void write_pci_io_bar(struct pci_device *v, int bar_number, uint32_t val) {
+  write_pci_raw_bar(v, bar_number, (val & (~0x3)) | 0x1);
 }
 
 static void probe_pci(void) {
