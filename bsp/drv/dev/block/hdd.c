@@ -892,12 +892,6 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   queue_init(&c->request_queue);
   c->disk_active = 0;
 
-  /* TODO: if we're operating in compatibility/legacy mode, we are
-     behaving like an old school IDE adapter, which wants to use IRQ14
-     for the primary and IRQ15 for the secondary controller. We
-     currently only take one IRQ, so secondary controllers won't
-     work. */
-
   /* TODO: claiming an IRQ more than once causes, um, issues, so don't do that. Ever. */
 
   /* TODO: this will ABSOLUTELY not work if there's more than one IDE
