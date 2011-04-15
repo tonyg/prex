@@ -157,6 +157,8 @@ struct ata_disk {
   int dma_supported;
   uint32_t sector_capacity;
   uint64_t addressable_sector_count;
+  int logical_sectors_per_physical_sector;
+  int bytes_per_logical_sector;
 
   /* The name of this device as it is known to the kernel. The file
      system's "/dev" node for this device is named using this. */
@@ -681,6 +683,22 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
   disk->lba_supported = ((disk->identification_space[99] & 2) != 0);
   disk->dma_supported = ((disk->identification_space[99] & 1) != 0);
   memcpy(&disk->sector_capacity, &disk->identification_space[114], sizeof(disk->sector_capacity));
+  {
+    uint16_t w;
+    memcpy(&w, &disk->identification_space[212], sizeof(w));
+    if (w & 0x2000) {
+      disk->logical_sectors_per_physical_sector = 1 << (w & 0x000f);
+    } else {
+      disk->logical_sectors_per_physical_sector = 1;
+    }
+    if (w & 0x1000) {
+      uint16_t w2;
+      memcpy(&w2, &disk->identification_space[234], sizeof(w2));
+      disk->bytes_per_logical_sector = w2 * 2; /* the value in the block is in 16-bit words */
+    } else {
+      disk->bytes_per_logical_sector = 512;
+    }
+  }
 
   if (!disk->lba_supported) {
     printf("Disk %d doesn't support LBA.\n", disknum);
@@ -738,6 +756,9 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
 	 (uint32_t) disk->addressable_sector_count,
 	 (uint32_t) (disk->addressable_sector_count >> 32),
 	 (uint32_t) disk->addressable_sector_count);
+  printf(" - %d log/phys, %d bytes/logical sector\n",
+	 disk->logical_sectors_per_physical_sector,
+	 disk->bytes_per_logical_sector);
 
   setup_partitions(self, disk);
   return 0;
