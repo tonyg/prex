@@ -904,8 +904,15 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
      controller in the system, because they'll fight for the IRQ. */
 
   if (primary_native) {
+    uint8_t configured_irq;
     /* Tell the controller which IRQ to use, if we're in native mode. */
     write_pci_interrupt_line(v, HDC_NATIVE_IRQ);
+    configured_irq = read_pci_interrupt_line(v);
+    if (configured_irq != HDC_NATIVE_IRQ) {
+      printf("WARNING: couldn't configure IDE controller interrupt. Wanted %d, got %d\n",
+	     HDC_NATIVE_IRQ,
+	     configured_irq);
+    }
     c->irq = irq_attach(HDC_NATIVE_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
   } else {
     c->irq = irq_attach(HDC_PRIMARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
