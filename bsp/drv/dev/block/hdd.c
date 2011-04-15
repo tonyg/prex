@@ -66,10 +66,10 @@ typedef enum ata_port_register_t_ {
    control/altstatus register. */
 #define ATA_LEGACY_CONTROL_ALTERNATE_STATUS_OFFSET 0x206
 
-/* These flags appear in the contents of ATA_REG_ERR. These aren't the
-   only flags that exist, there are others (see the various sources of
-   information linked above), but these are the only ones this driver
-   cares about for now. */
+/* These flags appear in the contents of ATA_REG_COMMAND_STATUS. These
+   aren't the only flags that exist, there are others (see the various
+   sources of information linked above), but these are the only ones
+   this driver cares about for now. */
 typedef enum ata_status_flag_t_ {
   ATA_STATUS_FLAG_ERROR = 0x01,
   ATA_STATUS_FLAG_DRQ = 0x08,
@@ -77,6 +77,18 @@ typedef enum ata_status_flag_t_ {
   ATA_STATUS_FLAG_DEVICE_READY = 0x40, /* set when spun up and no error? */
   ATA_STATUS_FLAG_BUSY = 0x80
 } ata_status_flag_t;
+
+/* These flags appear in the contents of ATA_REG_ERR. */
+typedef enum ata_error_flag_t_ {
+  ATA_ERROR_FLAG_ILLEGAL_LENGTH = 0x01,
+  ATA_ERROR_FLAG_NO_MEDIA = 0x02,
+  ATA_ERROR_FLAG_ABORT = 0x04,
+  ATA_ERROR_FLAG_MEDIA_CHANGE_REQUEST = 0x08,
+  ATA_ERROR_FLAG_ID_NOT_FOUND = 0x10,
+  ATA_ERROR_FLAG_MEDIA_CHANGED = 0x20,
+  ATA_ERROR_FLAG_UNCORRECTABLE_DATA = 0x40,
+  ATA_ERROR_FLAG_BAD_BLOCK = 0x80 /* or, according to FreeBSD, UDMA CRC error */
+} ata_error_flag_t;
 
 #define DEBUG_HDD 1
 
