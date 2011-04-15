@@ -587,16 +587,17 @@ static void hdc_ist(void *arg) {
    everything up. */
 static int read_during_setup(struct ata_disk *disk, uint64_t lba, uint8_t *buf, size_t count) {
   struct ata_controller *c = disk->controller;
-  int status;
+  int error;
   hdd_setup_io(disk, IO_READ, lba, count);
   ata_delay400(c, disk->channel);
   ata_wait(c, disk->channel);
-  status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
-  if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
-    printf("Couldn't read_during_setup %s (lba %u, count %u): 0x%02x, 0x%02x\n",
+  error = wait_for_drq(c, disk->channel);
+  if (error != 0) {
+    printf("Couldn't read_during_setup %s (lba %u, count %u): 0x%08x\n",
 	   disk->devname,
-	   (unsigned int) lba, count,
-	   status, ata_read(c, disk->channel, ATA_REG_ERR));
+	   (unsigned int) lba,
+	   count,
+	   error);
     return EIO;
   }
 
