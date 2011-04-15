@@ -262,8 +262,8 @@ static void ata_delay400(struct ata_controller *c, int channelnum) {
 static void ata_wait(struct ata_controller *c, int channelnum) {
   unsigned int i;
 
-  /* TODO: find out whether one I/O port read is roughly one microsecond. */
-  for (i = 0; i < 1000000 /* 1 second? */ ; i++) {
+  /* TODO: tune this loop somehow. The current limit is utterly ad-hoc. */
+  for (i = 0; i < 10000000 /* 1 second? */ ; i++) {
     if (!(read_altstatus(c, channelnum) & ATA_STATUS_FLAG_BUSY)) {
       return;
     }
