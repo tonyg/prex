@@ -549,9 +549,9 @@ static int read_during_setup(struct ata_disk *disk, uint64_t lba, uint8_t *buf, 
   ata_wait(c, disk->channel);
   status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
   if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
-    printf("Couldn't read_during_setup %s (lba %d, count %d): 0x%02x, 0x%02x\n",
+    printf("Couldn't read_during_setup %s (lba %u, count %u): 0x%02x, 0x%02x\n",
 	   disk->devname,
-	   lba, count,
+	   (unsigned int) lba, count,
 	   status, ata_read(c, disk->channel, ATA_REG_ERR));
     return EIO;
   }
