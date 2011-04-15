@@ -639,6 +639,21 @@ static void fixup_string_endianness(uint8_t *p, size_t size) {
   }
 }
 
+static void dump1(uint8_t *buf, size_t count) {
+  size_t off = 0;
+  while (count) {
+    int linelen = count > 32 ? 32 : count;
+    printf("%03d ", off);
+    while (linelen) {
+      printf("%02x", buf[off]);
+      linelen--;
+      count--;
+      off++;
+    }
+    printf("\n");
+  }
+}
+
 static int setup_disk(struct driver *self, struct ata_controller *c, int disknum) {
   struct ata_disk *disk = kmem_alloc(sizeof(struct ata_disk));
 
@@ -677,6 +692,7 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
      don't check those here. (TODO) */
 
   ata_pio_read(c, disk->channel, disk->identification_space, sizeof(disk->identification_space));
+  dump1(disk->identification_space, sizeof(disk->identification_space));
 
   memcpy(disk->serial_number, &disk->identification_space[20], sizeof(disk->serial_number));
   memcpy(disk->firmware_revision, &disk->identification_space[46], sizeof(disk->firmware_revision));
@@ -687,6 +703,7 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
   {
     uint16_t w;
     memcpy(&w, &disk->identification_space[212], sizeof(w));
+    printf("w is %u\n", (unsigned) w);
     if (w & 0x2000) {
       disk->logical_sectors_per_physical_sector = 1 << (w & 0x000f);
     } else {
@@ -695,6 +712,7 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
     if (w & 0x1000) {
       uint16_t w2;
       memcpy(&w2, &disk->identification_space[234], sizeof(w2));
+      printf("w2 is %u\n", (unsigned) w2);
       disk->bytes_per_logical_sector = w2 * 2; /* the value in the block is in 16-bit words */
     } else {
       disk->bytes_per_logical_sector = 512;
