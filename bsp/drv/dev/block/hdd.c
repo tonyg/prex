@@ -21,8 +21,6 @@ typedef unsigned long long uint64_t; /* Hmm. */
 #define HDC_PRIMARY_IRQ		14	/* Yeah, there are more than 16 these days.
 					   Does prex support anything more than 16? */
 #define HDC_SECONDARY_IRQ	15
-#define HDC_NATIVE_IRQ		11	/* HACK absent a decent IRQ assignment system
-					   in the kernel... */
 /* In any case, we should be spreading the load around, and not
  * sharing one IRQ for all the IDE controllers in the system. For now,
  * sharing the IRQ is fine.
@@ -30,6 +28,13 @@ typedef unsigned long long uint64_t; /* Hmm. */
  * FIXME: OK, sharing *would* be fine, but see the comment in the
  * implementation of irq_attach that says that sharing isn't supported
  * by prex. */
+
+#define HDC_NATIVE_IRQ		11
+/* ^^ Just blindly taking IRQ 11 is a HACK absent a decent IRQ
+   assignment system in the kernel... and it's worth noting I've yet
+   to find a controller that boots in native mode that works, so I
+   haven't been able to test anything other than compatibility/legacy
+   mode at all. */
 
 #define SECTOR_SIZE	512
 
