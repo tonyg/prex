@@ -21,6 +21,8 @@ typedef unsigned long long uint64_t; /* Hmm. */
 #define HDC_PRIMARY_IRQ		14	/* Yeah, there are more than 16 these days.
 					   Does prex support anything more than 16? */
 #define HDC_SECONDARY_IRQ	15
+#define HDC_NATIVE_IRQ		11	/* HACK absent a decent IRQ assignment system
+					   in the kernel... */
 /* In any case, we should be spreading the load around, and not
  * sharing one IRQ for all the IDE controllers in the system. For now,
  * sharing the IRQ is fine.
@@ -892,17 +894,23 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
      work. */
 
   /* TODO: claiming an IRQ more than once causes, um, issues, so don't do that. Ever. */
-  c->irq = irq_attach(HDC_PRIMARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
+
+  /* TODO: this will ABSOLUTELY not work if there's more than one IDE
+     controller in the system, because they'll fight for the IRQ. */
+
+  if (primary_native) {
+    /* Tell the controller which IRQ to use, if we're in native mode. */
+    write_pci_interrupt_line(v, HDC_NATIVE_IRQ);
+    c->irq = irq_attach(HDC_NATIVE_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
+  } else {
+    c->irq = irq_attach(HDC_PRIMARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
+  }
   if (secondary_native) {
+    /* I have no idea what happens when primary is in legacy mode, but
+       secondary is in native mode. Or vice versa. */
     c->irq_secondary = 0;
   } else {
     c->irq_secondary = irq_attach(HDC_SECONDARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
-  }
-
-  if (primary_native || secondary_native) {
-    /* Tell the controller which IRQ to use, if we're in native mode. */
-    /* It's an arbitrary choice between primary and secondary. */
-    write_pci_interrupt_line(v, HDC_PRIMARY_IRQ);
   }
 
   list_init(&c->disk_list); /* no disks yet; will scan in a moment */
