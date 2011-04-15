@@ -21,7 +21,8 @@ static void usage(void) {
   fprintf(stderr, "usage: wparttab { -r | -w } <devicename>\n");
   fprintf(stderr, "If -r is given, prints output suitable for feeding back to its input;\n");
   fprintf(stderr, "if -w is given, expects stdin to contain partition entries of the form:\n");
-  fprintf(stderr, "<partnum>,<typecode>,<startlba>,<sectorcount>\n");
+  fprintf(stderr, "<partnum>,<typecode>,<startlba>,<sectorcount>,<flags>\n");
+  fprintf(stderr, "Note that the flags byte should have bit 0x80 set for the 'bootable' flag.\n");
   exit(1);
 }
 
@@ -31,11 +32,12 @@ static void feedback(unsigned char *sector) {
     struct partition part;
     memcpy(&part, &sector[0x1be + (i * 16)], sizeof(part));
     if (part.start_lba && part.sector_count && part.system_id) {
-      printf("%u,%u,%u,%u\n",
+      printf("%u,%u,%u,%u,%u\n",
 	     i,
 	     part.system_id,
 	     part.start_lba,
-	     part.sector_count);
+	     part.sector_count,
+	     part.flags);
     }
   }
 }
@@ -141,9 +143,11 @@ int main(int argc, char *argv[]) {
 	part.start_lba = strtoul(t, NULL, 0);
 	if ((t = strtok(NULL, ",")) == NULL) continue;
 	part.sector_count = strtoul(t, NULL, 0);
+	if ((t = strtok(NULL, ",")) == NULL) continue;
+	part.flags = strtoul(t, NULL, 0);
 
-	printf("Partition %u will start at %u for %u sectors, type %u\n",
-	       partnum, part.start_lba, part.sector_count, part.system_id);
+	printf("Partition %u will start at %u for %u sectors, type %u, flags %u\n",
+	       partnum, part.start_lba, part.sector_count, part.system_id, part.flags);
 	memcpy(&sector[0x1be + (partnum * 16)], &part, sizeof(part));
       }
 
