@@ -265,20 +265,26 @@ static void ata_delay400(struct ata_controller *c, int channelnum) {
   read_altstatus(c, channelnum);
 }
 
-/* Poll until the BUSY flag clears. */
-static void ata_wait(struct ata_controller *c, int channelnum) {
+/* Poll until the BUSY flag clears. Returns 1 for OK, 0 for failure. */
+static int ata_wait(struct ata_controller *c, int channelnum) {
   unsigned int i;
 
   /* TODO: tune this loop somehow. The current limit is utterly ad-hoc. */
-  for (i = 0; i < 10000000 /* 1 second? */ ; i++) {
-    if (!(read_altstatus(c, channelnum) & ATA_STATUS_FLAG_BUSY)) {
-      return;
+  for (i = 0; i < 1000000 /* 1 second? */ ; i++) {
+    uint8_t status = read_altstatus(c, channelnum);
+    if (!(status & ATA_STATUS_FLAG_BUSY)) {
+      return 1;
+    }
+    if (status & (ATA_STATUS_FLAG_ERROR | ATA_STATUS_FLAG_DEVICE_FAILURE)) {
+      return 0;
     }
   }
 
   printf("ata_wait: busy never went away!!\n");
   /* TODO: reset device here, maybe? We'd have to retry or abort
-     in-progress operations. */
+     in-progress operations. See callers for more insight into this
+     point. */
+  return 0;
 }
 
 /* Programmed I/O (PIO) read a buffer's worth of data from the controller. */
@@ -407,8 +413,11 @@ static void maybe_send_next_request(struct ata_controller *c) {
 
     hdd_setup_io(req->disk, irp->cmd, irp->blkno, irp->blksz); /* TODO: 64 bit irp->blkno? */
     if (irp->cmd == IO_WRITE) {
-      ata_wait(c, req->disk->channel);
-      ata_pio_write(c, req->disk->channel, irp->buf, SECTOR_SIZE);
+      if (ata_wait(c, req->disk->channel)) {
+	ata_pio_write(c, req->disk->channel, irp->buf, SECTOR_SIZE);
+      } else {
+	/* TODO: cope with BUSY never going away */
+      }
       /* Adjust buf and blksz in the interrupt handler. */
     }
     req->state = REQ_WAITING_FOR_DEVICE;
@@ -509,7 +518,10 @@ static void hdc_ist(void *arg) {
     /* DPRINTF(("%08x ist cmd %d\n", timer_ticks(), irp->cmd)); */
 
     /* Wait for BUSY to clear, if it's set. */
-    ata_wait(c, disk->channel);
+    if (!ata_wait(c, disk->channel)) {
+      printf("%s BUSY never cleared\n", disk->devname);
+      /* TODO: reset controller/disk and retry (?) */
+    }
 
     /* Now, properly read-and-clear the status flags. */
     status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
@@ -704,7 +716,11 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
   }
 
   ata_delay400(c, disk->channel);
-  ata_wait(c, disk->channel);
+  if (!ata_wait(c, disk->channel)) {
+    printf("Disk %d absent (BUSY never cleared).\n", disknum);
+    goto cancel_setup;
+  }
+
   if (read_altstatus(c, disk->channel) & ATA_STATUS_FLAG_ERROR) {
     printf("Disk %d absent (wouldn't identify).\n", disknum);
     goto cancel_setup;
