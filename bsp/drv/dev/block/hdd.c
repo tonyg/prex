@@ -102,6 +102,9 @@ typedef enum ata_error_flag_t_ {
 /* At present, we limit individual transfers to a maximum of
    BUFFER_LENGTH bytes. TODO: once we switch to DMA, this will
    probably become obsolete. */
+/* However, 28-bit PIO mode doesn't support the transfer of more than
+   256 sectors = 128kBy at once, so splitting up large I/Os might
+   still be an interesting thing to do. */
 #define BUFFER_LENGTH 65536
 #define BUFFER_LENGTH_IN_SECTORS (BUFFER_LENGTH / SECTOR_SIZE)
 
@@ -156,10 +159,14 @@ struct ata_disk {
   uint8_t model[40];
   int lba_supported;
   int dma_supported;
+  int _48bit_io_supported;
   uint32_t sector_capacity;
   uint64_t addressable_sector_count;
   int logical_sectors_per_physical_sector;
   int bytes_per_logical_sector;
+
+  /* Computed based on some of the extracted identification_space fields. */
+  int use_48bit_io;
 
   /* The name of this device as it is known to the kernel. The file
      system's "/dev" node for this device is named using this. */
@@ -329,14 +336,26 @@ static void hdd_setup_io(struct ata_disk *disk,
 
   switch (cmd) {
     case IO_READ:
-      /* Send READ SECTORS EXT command. */
-      ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
-      final_cmd = 0x24;
+      if (disk->use_48bit_io) {
+	/* Send READ SECTORS EXT command. */
+	ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
+	final_cmd = 0x24;
+      } else {
+	/* Send READ SECTORS command. */
+	ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0xE0 | (disk->slave << 4));
+	final_cmd = 0x20;
+      }
       break;
     case IO_WRITE:
-      /* Send WRITE SECTORS EXT command. */
-      ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
-      final_cmd = 0x34;
+      if (disk->use_48bit_io) {
+	/* Send WRITE SECTORS EXT command. */
+	ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0x40 | (disk->slave << 4));
+	final_cmd = 0x34;
+      } else {
+	/* Send WRITE SECTORS command. */
+	ata_write(c, disk->channel, ATA_REG_DISK_SELECT, 0xE0 | (disk->slave << 4));
+	final_cmd = 0x30;
+      }
       break;
     default:
       panic("hdd_setup_io invalid cmd");
@@ -345,14 +364,17 @@ static void hdd_setup_io(struct ata_disk *disk,
 
   /* DPRINTF(("%08x Send cmd %d lba %d\n", timer_ticks(), cmd, (int) lba)); */
 
-  ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, (sector_count >> 8) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_LOW, (lba >> 24) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 32) & 0xff);
-  ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 40) & 0xff);
+  if (disk->use_48bit_io) {
+    ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, (sector_count >> 8) & 0xff);
+    ata_write(c, disk->channel, ATA_REG_LBA_LOW, (lba >> 24) & 0xff);
+    ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 32) & 0xff);
+    ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 40) & 0xff);
+  }
   ata_write(c, disk->channel, ATA_REG_SECTOR_COUNT, sector_count & 0xff);
   ata_write(c, disk->channel, ATA_REG_LBA_LOW, lba & 0xff);
   ata_write(c, disk->channel, ATA_REG_LBA_MID, (lba >> 8) & 0xff);
   ata_write(c, disk->channel, ATA_REG_LBA_HIGH, (lba >> 16) & 0xff);
+
   ata_write(c, disk->channel, ATA_REG_COMMAND_STATUS, final_cmd);
 
   /* We'll get an interrupt sometime, if interrupts aren't disabled;
@@ -639,20 +661,20 @@ static void fixup_string_endianness(uint8_t *p, size_t size) {
   }
 }
 
-static void dump1(uint8_t *buf, size_t count) {
-  size_t off = 0;
-  while (count) {
-    int linelen = count > 32 ? 32 : count;
-    printf("%03d ", off);
-    while (linelen) {
-      printf("%02x", buf[off]);
-      linelen--;
-      count--;
-      off++;
-    }
-    printf("\n");
-  }
-}
+/* static void dump1(uint8_t *buf, size_t count) { */
+/*   size_t off = 0; */
+/*   while (count) { */
+/*     int linelen = count > 32 ? 32 : count; */
+/*     printf("%03d ", off); */
+/*     while (linelen) { */
+/*       printf("%02x", buf[off]); */
+/*       linelen--; */
+/*       count--; */
+/*       off++; */
+/*     } */
+/*     printf("\n"); */
+/*   } */
+/* } */
 
 static int setup_disk(struct driver *self, struct ata_controller *c, int disknum) {
   struct ata_disk *disk = kmem_alloc(sizeof(struct ata_disk));
@@ -692,18 +714,18 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
      don't check those here. (TODO) */
 
   ata_pio_read(c, disk->channel, disk->identification_space, sizeof(disk->identification_space));
-  dump1(disk->identification_space, sizeof(disk->identification_space));
+  /* dump1(disk->identification_space, sizeof(disk->identification_space)); */
 
   memcpy(disk->serial_number, &disk->identification_space[20], sizeof(disk->serial_number));
   memcpy(disk->firmware_revision, &disk->identification_space[46], sizeof(disk->firmware_revision));
   memcpy(disk->model, &disk->identification_space[54], sizeof(disk->model));
   disk->lba_supported = ((disk->identification_space[99] & 2) != 0);
   disk->dma_supported = ((disk->identification_space[99] & 1) != 0);
+  disk->_48bit_io_supported = ((disk->identification_space[167] & 4) != 0);
   memcpy(&disk->sector_capacity, &disk->identification_space[114], sizeof(disk->sector_capacity));
   {
     uint16_t w;
     memcpy(&w, &disk->identification_space[212], sizeof(w));
-    printf("w is %u\n", (unsigned) w);
     if (w & 0x2000) {
       disk->logical_sectors_per_physical_sector = 1 << (w & 0x000f);
     } else {
@@ -712,7 +734,6 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
     if (w & 0x1000) {
       uint16_t w2;
       memcpy(&w2, &disk->identification_space[234], sizeof(w2));
-      printf("w2 is %u\n", (unsigned) w2);
       disk->bytes_per_logical_sector = w2 * 2; /* the value in the block is in 16-bit words */
     } else {
       disk->bytes_per_logical_sector = 512;
@@ -740,8 +761,16 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
       /* More than 28 bits' worth of sectors - read the lba48 area */
       memcpy(&lba48_count, &disk->identification_space[200], sizeof(lba48_count));
       disk->addressable_sector_count = lba48_count;
+      if (disk->_48bit_io_supported) {
+	disk->use_48bit_io = 1;
+      } else {
+	printf("Disk %d gives a sector count that needs 48-bit I/O but doesn't support that mode\n",
+	       disknum);
+	goto cancel_setup;
+      }
     } else {
       disk->addressable_sector_count = lba28_count;
+      disk->use_48bit_io = 0;
     }
   }
 
@@ -778,6 +807,9 @@ static int setup_disk(struct driver *self, struct ata_controller *c, int disknum
   printf(" - %d log/phys, %d bytes/logical sector\n",
 	 disk->logical_sectors_per_physical_sector,
 	 disk->bytes_per_logical_sector);
+  printf(" - %s 48-bit I/O, %s 48-bit I/O\n",
+	 disk->_48bit_io_supported ? "supports" : "doesn't support",
+	 disk->use_48bit_io ? "using" : "not using");
 
   setup_partitions(self, disk);
   return 0;
