@@ -73,6 +73,7 @@ typedef enum ata_port_register_t_ {
 typedef enum ata_status_flag_t_ {
   ATA_STATUS_FLAG_ERROR = 0x01,
   ATA_STATUS_FLAG_DRQ = 0x08,
+  ATA_STATUS_FLAG_DRIVE_SEEK_COMPLETED = 0x10, /* also "needs service" bit?? */
   ATA_STATUS_FLAG_DEVICE_FAILURE = 0x20, /* also DMA-ready bit?? */
   ATA_STATUS_FLAG_DEVICE_READY = 0x40, /* set when spun up and no error? */
   ATA_STATUS_FLAG_BUSY = 0x80
