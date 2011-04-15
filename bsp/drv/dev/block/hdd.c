@@ -503,8 +503,8 @@ static void hdc_ist(void *arg) {
     if ((status0 & (ATA_STATUS_FLAG_DRQ | ATA_STATUS_FLAG_ERROR)) ||
 	(status1 & (ATA_STATUS_FLAG_DRQ | ATA_STATUS_FLAG_ERROR)))
       {
-	DPRINTF(("%08x Spurious disk interrupt (0x%02x, 0x%02x)\n",
-		 timer_ticks(), status0, status1));
+	DPRINTF(("%08x Spurious disk interrupt for %s (status0 0x%02x, status1 0x%02x)\n",
+		 timer_ticks(), c->devname, status0, status1));
       }
 #else
     ata_read(c, 0, ATA_REG_COMMAND_STATUS);
