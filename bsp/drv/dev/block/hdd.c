@@ -16,6 +16,33 @@ typedef unsigned long long uint64_t; /* Hmm. */
    http://www.t13.org/documents/UploadedDocuments/docs2006/D1700r3-ATA8-AAM.pdf
    http://suif.stanford.edu/~csapuntz/specs/pciide.ps
    http://suif.stanford.edu/~csapuntz/specs/idems100.ps
+
+   PCI specifications:
+   http://www.pcisig.com/specifications/conventional/
+   http://www.math.uni.wroc.pl/~p-wyk4/so/pci23.pdf
+   http://people.na.infn.it/~garufi/didattica/CorsoAcq/PCI.Local.Bus.Specification.Revision.3.0.pdf
+
+   PCI interrupt routing:
+   http://www.mindshare.com/files/ebooks/PCI%20System%20Architecture%20(4th%20Edition).pdf
+   (Missing pages, incl p234 which specifies the location and format
+   of the $PIR table. See Google Books instead:
+   http://books.google.com/books?id=tbIvDKSZbR0C&lpg=PA234&ots=s8PjROiJtn&dq=pci%20pir%20table&pg=PA234#v=onepage&q=pci%20pir%20table&f=false)
+   http://www.microsoft.com/taiwan/whdc/archive/pciirq.mspx
+
+   Intel's Multi-processor specification:
+   http://www.intel.com/design/pentium/datashts/24201606.pdf
+
+   ACPI specification, v4.0:
+   http://www.acpi.info/DOWNLOADS/ACPIspec40a.pdf
+
+   Discussion of initialization of I/O APICs:
+   http://forum.osdev.org/viewtopic.php?f=1&t=21225&start=0
+   Discussion of MSI and some of the awkwardnesses of working with it:
+   http://forum.osdev.org/viewtopic.php?f=1&t=16007&start=0
+
+   PCI Interrupts for x86 Machines under FreeBSD:
+   http://people.freebsd.org/~jhb/papers/bsdcan/2007/article.pdf
+   http://people.freebsd.org/~jhb/papers/bsdcan/2007/article/article.html
 */
 
 #define HDC_PRIMARY_IRQ		14	/* Yeah, there are more than 16 these days.
