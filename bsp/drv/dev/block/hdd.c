@@ -241,6 +241,8 @@ struct ata_controller {
   timer_t tmr; /* timeout timer id */
   struct ata_channel channel[2]; /* the two channels within the controller */
   struct list disk_list; /* all disks attached to this controller */
+  int timeout_count; /* count of timeouts that have occurred */
+  int interrupt_count; /* count of interrupts and timeouts that have occurred */
 };
 
 #if 0 /* we don't need this yet */
@@ -427,7 +429,12 @@ static void hdd_setup_io(struct ata_disk *disk,
 static void hdc_ist(void *arg); /* prototype, because referenced in timeout_handler. */
 
 static void timeout_handler(void *arg) {
-  DPRINTF(("%08x hdd timeout!\n", timer_ticks()));
+  struct ata_controller *c = arg;
+  DPRINTF(("%08x hdd %s timeout! PCI status 0x%04x command 0x%04x\n",
+	   timer_ticks(), c->devname,
+	   read_pci_status(c->pci_dev), read_pci_command(c->pci_dev)));
+  DPRINTF(("%s timeouts %d, ists %d\n", c->devname, c->timeout_count, c->interrupt_count));
+  c->timeout_count++;
   hdc_ist(arg);
 }
 
@@ -512,6 +519,8 @@ static int wait_for_drq(struct ata_controller *c, int channel) {
 static void hdc_ist(void *arg) {
   struct ata_controller *c = arg;
   int s = splhigh();
+
+  c->interrupt_count++;
 
   /* Don't return from this function without calling splx(s). */
 
@@ -936,6 +945,9 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   } else {
     c->irq_secondary = irq_attach(HDC_SECONDARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
   }
+
+  c->timeout_count = 0;
+  c->interrupt_count = 0;
 
   list_init(&c->disk_list); /* no disks yet; will scan in a moment */
 
