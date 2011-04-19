@@ -43,3 +43,5 @@ capability	/boot/lock	CAP_USERFILES
 
 capability	/boot/mkdosfs	CAP_RAWIO
 capability	/boot/wparttab	CAP_RAWIO
+
+capability	/boot/diskutil	CAP_DISKADMIN
