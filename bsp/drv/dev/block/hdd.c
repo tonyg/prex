@@ -56,13 +56,6 @@ typedef unsigned long long uint64_t; /* Hmm. */
  * implementation of irq_attach that says that sharing isn't supported
  * by prex. */
 
-#define HDC_NATIVE_IRQ		11
-/* ^^ Just blindly taking IRQ 11 is a HACK absent a decent IRQ
-   assignment system in the kernel... and it's worth noting I've yet
-   to find a controller that boots in native mode that works, so I
-   haven't been able to test anything other than compatibility/legacy
-   mode at all. */
-
 #define SECTOR_SIZE	512
 
 /* These are the offsets to various IDE/ATA registers, relative to
@@ -929,16 +922,9 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
      controller in the system, because they'll fight for the IRQ. */
 
   if (primary_native) {
-    uint8_t configured_irq;
-    /* Tell the controller which IRQ to use, if we're in native mode. */
-    write_pci_interrupt_line(v, HDC_NATIVE_IRQ);
-    configured_irq = read_pci_interrupt_line(v);
-    if (configured_irq != HDC_NATIVE_IRQ) {
-      printf("WARNING: couldn't configure IDE controller interrupt. Wanted %d, got %d\n",
-	     HDC_NATIVE_IRQ,
-	     configured_irq);
-    }
-    c->irq = irq_attach(HDC_NATIVE_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
+    uint8_t configured_irq = read_pci_interrupt_line(v);
+    printf("ATA native PCI IRQ for %s is %d\n", c->devname, configured_irq);
+    c->irq = irq_attach(configured_irq, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
   } else {
     c->irq = irq_attach(HDC_PRIMARY_IRQ, IPL_BLOCK, 0, hdc_isr, hdc_ist, c);
   }
