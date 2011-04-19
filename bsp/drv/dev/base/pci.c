@@ -95,6 +95,22 @@ void write_pci8(struct pci_device *v, int offset, uint8_t val) {
   write_pci_raw(v->bus, v->slot, v->function, offset, 1, val);
 }
 
+uint16_t read_pci_status(struct pci_device *v) {
+  return read_pci16(v, PCI_REGISTER_STATUS);
+}
+
+void clear_pci_status(struct pci_device *v, uint16_t val) {
+  write_pci16(v, PCI_REGISTER_STATUS, val);
+}
+
+uint16_t read_pci_command(struct pci_device *v) {
+  return read_pci16(v, PCI_REGISTER_COMMAND);
+}
+
+void write_pci_command(struct pci_device *v, uint16_t val) {
+  write_pci16(v, PCI_REGISTER_COMMAND, val);
+}
+
 uint8_t read_pci_interrupt_line(struct pci_device *v) {
   return read_pci8(v, PCI_REGISTER_INTERRUPT_LINE);
 }

@@ -65,6 +65,25 @@ typedef enum pci_register_offset_t_ {
   PCI_REGISTER_MAX_LATENCY = 63
 } pci_register_offset_t;
 
+typedef enum pci_status_bit_t_ {
+  PCI_STATUS_INTERRUPT = 0x0008,
+  PCI_STATUS_CAPABILITIES_LIST = 0x0010,
+  PCI_STATUS_66_MHZ_CAPABLE = 0x0020,
+  PCI_STATUS_FAST_BACKTOBACK_CAPABLE = 0x0080,
+  PCI_STATUS_MASTER_DATA_PARITY_ERROR = 0x0100,
+
+  PCI_STATUS_DEVSEL_MASK = 0x0600,
+  PCI_STATUS_DEVSEL_FAST = 0x0000,
+  PCI_STATUS_DEVSEL_MEDIUM = 0x0200,
+  PCI_STATUS_DEVSEL_SLOW = 0x0400,
+
+  PCI_STATUS_SIGNALED_TARGET_ABORT = 0x0800,
+  PCI_STATUS_RECEIVED_TARGET_ABORT = 0x1000,
+  PCI_STATUS_RECEIVED_MASTER_ABORT = 0x2000,
+  PCI_STATUS_SIGNALED_SYSTEM_ERROR = 0x4000,
+  PCI_STATUS_DETECTED_PARITY_ERROR = 0x8000
+} pci_status_bit_t;
+
 struct pci_device {
   int bus;
   int slot;
@@ -96,9 +115,17 @@ extern void write_pci32(struct pci_device *v, int offset, uint32_t val);
 extern void write_pci16(struct pci_device *v, int offset, uint16_t val);
 extern void write_pci8(struct pci_device *v, int offset, uint8_t val);
 
+extern uint16_t read_pci_status(struct pci_device *v);
+extern uint16_t read_pci_command(struct pci_device *v);
+
 extern uint8_t read_pci_interrupt_line(struct pci_device *v);
 extern uint32_t read_pci_raw_bar(struct pci_device *v, int bar_number);
 extern uint32_t read_pci_io_bar(struct pci_device *v, int bar_number);
+
+/* Set bits in val will be CLEARED in the status word */
+extern void clear_pci_status(struct pci_device *v, uint16_t val);
+
+extern void write_pci_command(struct pci_device *v, uint16_t val);
 
 extern void write_pci_interrupt_line(struct pci_device *v, int irqno);
 extern void write_pci_raw_bar(struct pci_device *v, int bar_number, uint32_t val);
