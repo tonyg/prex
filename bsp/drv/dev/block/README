@@ -3,4 +3,12 @@ NEXT TO DO
 
 Handle errors reported from ata_wait?
 
+See if the missing interrupts on that systems machine could be related
+to the interrupt disable bit of the PCI config command register,
+i.e. are IRQs disabled for the device?
+
+ - Alternatively (and actually this should be done in any case), print
+   out the assigned IRQ number and try just using that, not
+   overwriting it with the arbitrary choice made in the code.
+
 Testing.
