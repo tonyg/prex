@@ -673,20 +673,20 @@ static int read_during_setup(struct ata_disk *disk, uint64_t lba, uint8_t *buf, 
   return 0;
 }
 
-static void dump1(uint8_t *buf, size_t count) {
-  size_t off = 0;
-  while (count) {
-    int linelen = count > 32 ? 32 : count;
-    printf("%03d ", off);
-    while (linelen) {
-      printf("%02x", buf[off]);
-      linelen--;
-      count--;
-      off++;
-    }
-    printf("\n");
-  }
-}
+/* static void dump1(uint8_t *buf, size_t count) { */
+/*   size_t off = 0; */
+/*   while (count) { */
+/*     int linelen = count > 32 ? 32 : count; */
+/*     printf("%03d ", off); */
+/*     while (linelen) { */
+/*       printf("%02x", buf[off]); */
+/*       linelen--; */
+/*       count--; */
+/*       off++; */
+/*     } */
+/*     printf("\n"); */
+/*   } */
+/* } */
 
 /* Read a disk's partition table. */
 static void setup_partitions(struct driver *self, struct ata_disk *disk) {
@@ -696,9 +696,6 @@ static void setup_partitions(struct driver *self, struct ata_disk *disk) {
     kmem_free(sector0);
     return;
   }
-
-  printf("Disk %s's root sector:\n", disk->devname);
-  dump1(sector0, SECTOR_SIZE);
 
   if (0xaa55 == (* (uint16_t *) (&sector0[SECTOR_SIZE - 2]))) {
     int partition;
