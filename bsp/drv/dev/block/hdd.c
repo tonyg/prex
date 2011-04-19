@@ -16,6 +16,7 @@ typedef unsigned long long uint64_t; /* Hmm. */
    http://www.t13.org/documents/UploadedDocuments/docs2006/D1700r3-ATA8-AAM.pdf
    http://suif.stanford.edu/~csapuntz/specs/pciide.ps
    http://suif.stanford.edu/~csapuntz/specs/idems100.ps
+   http://www.intel.com/Assets/PDF/datasheet/252516.pdf
 
    PCI specifications:
    http://www.pcisig.com/specifications/conventional/
