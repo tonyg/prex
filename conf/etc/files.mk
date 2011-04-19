@@ -52,6 +52,7 @@ ifneq ($(_QUICK_),1)
 ifneq ($(CONFIG_TINY),y)
 FILES+=		$(SRCDIR)/usr/sample/hello/hello
 FILES+=		$(SRCDIR)/usr/sample/tetris/tetris
+FILES+=		$(SRCDIR)/usr/sample/fsperf/fsperf
 endif
 endif
 

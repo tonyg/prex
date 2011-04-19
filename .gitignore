@@ -19,6 +19,7 @@ sys/prex
 usr/bin/cmdbox/cmdbox
 usr/sample/hello/hello
 usr/sample/tetris/tetris
+usr/sample/fsperf/fsperf
 usr/sbin/debug/debug
 usr/sbin/diskutil/diskutil
 usr/sbin/init/init
