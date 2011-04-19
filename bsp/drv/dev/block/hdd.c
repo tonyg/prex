@@ -80,6 +80,14 @@ typedef enum ata_port_register_t_ {
   ATA_REG_COMMAND_STATUS = 7
 } ata_port_register_t;
 
+/* These are the offsets to Bus-mastering DMA registers, relative to
+ * ata_channel.dma_port in I/O port space. */
+typedef enum dma_port_register_t_ {
+  DMA_REG_COMMAND = 0,
+  DMA_REG_STATUS = 2,
+  DMA_REG_PRDT_ADDRESS = 4
+} dma_port_register_t;
+
 /* Some controllers operate in "PCI native" mode, where they specify
    the I/O ports they want us to use. Others operate in
    "compatibility" (a.k.a. legacy) mode, where we just have to know
@@ -106,6 +114,13 @@ typedef enum ata_status_flag_t_ {
   ATA_STATUS_FLAG_DEVICE_READY = 0x40, /* set when spun up and no error? */
   ATA_STATUS_FLAG_BUSY = 0x80
 } ata_status_flag_t;
+
+typedef enum dma_status_flag_t_ {
+  DMA_STATUS_FLAG_DMA_MODE = 0x01, /* if we are in DMA transfer mode */
+  DMA_STATUS_FLAG_DMA_ERROR = 0x02, /* if a DMA transfer failed */
+  DMA_STATUS_FLAG_DMA_INTERRUPT = 0x04 /* DMA interrupt occurred */
+  /* there are others, but they're apparently mostly obsolete */
+} dma_status_flag_t;
 
 /* These flags appear in the contents of ATA_REG_ERR. */
 typedef enum ata_error_flag_t_ {
@@ -239,6 +254,7 @@ struct ata_controller {
   irq_t irq; /* we registered an IRQ with the kernel; this is the handle we were given */
   irq_t irq_secondary; /* we may have registered an IRQ for the secondary channel too */
   timer_t tmr; /* timeout timer id */
+  int needs_dma_ack; /* HACK. See code relating to this field. */
   struct ata_channel channel[2]; /* the two channels within the controller */
   struct list disk_list; /* all disks attached to this controller */
   int timeout_count; /* count of timeouts that have occurred */
@@ -284,6 +300,21 @@ static void write_control(struct ata_controller *c, int channelnum, uint8_t val)
 /* Reads from the special control/altstatus register. */
 static uint8_t read_altstatus(struct ata_controller *c, int channelnum) {
   return bus_read_8(c->channel[channelnum].control_port);
+}
+
+/* Writes to an ATA DMA register. */
+static void dma_write(struct ata_controller *c, int channelnum, int reg, uint8_t val) {
+  bus_write_8(c->channel[channelnum].dma_port + reg, val);
+}
+
+/* Clears a collection of ATA DMA status register bits. */
+static void dma_status_clear(struct ata_controller *c, int channelnum, dma_status_flag_t bits) {
+  dma_write(c, channelnum, DMA_REG_STATUS, bits);
+}
+
+/* Reads from an ATA DMA register. */
+static uint8_t dma_read(struct ata_controller *c, int channelnum, int reg) {
+  return bus_read_8(c->channel[channelnum].dma_port + reg);
 }
 
 /* A 400ns delay, used to wait for the device to start processing a
@@ -563,6 +594,13 @@ static void hdc_ist(void *arg) {
     /* Now, properly read-and-clear the status flags. */
     status = ata_read(c, disk->channel, ATA_REG_COMMAND_STATUS);
     /* DPRINTF(("Initial status %02x\n", status)); */
+
+    /* See note in the code that sets needs_dma_ack. */
+    if (c->needs_dma_ack) {
+      /* TODO: maybe read and discard DMA_REG_STATUS here? */
+      /* Apparently it is required to do so when we're really using DMA. */
+      dma_status_clear(c, disk->channel, DMA_STATUS_FLAG_DMA_INTERRUPT);
+    }
 
     /* If successful, do the transfer. Otherwise complete the request
        without doing anything more. */
@@ -975,9 +1013,21 @@ static void setup_controller(struct driver *self, struct pci_device *v) {
   c->channel[0].dma_port = read_pci_io_bar(v, 4);
   c->channel[1].dma_port = c->channel[0].dma_port + 8;
 
-  printf(" - pri 0x%04x/0x%04x/0x%04x, sec 0x%04x/0x%04x/0x%04x\n",
+  /* On some controllers (e.g. the Dell implementation of Intel's
+     82801EB that I have handy), it seems that clearing the DMA
+     interrupt status bit is required even when not using DMA! */
+  if (read_pci_command(v) & PCI_COMMAND_BUS_MASTER) {
+    /* Bus mastering DMA is enabled. Conservatively decide we need to
+       ack DMA interrupts. */
+    c->needs_dma_ack = 1;
+  } else {
+    c->needs_dma_ack = 0;
+  }
+
+  printf(" - pri 0x%04x/0x%04x/0x%04x, sec 0x%04x/0x%04x/0x%04x, %s DMA ACK\n",
 	 c->channel[0].base_port, c->channel[0].control_port, c->channel[0].dma_port,
-	 c->channel[1].base_port, c->channel[1].control_port, c->channel[1].dma_port);
+	 c->channel[1].base_port, c->channel[1].control_port, c->channel[1].dma_port,
+	 c->needs_dma_ack ? "do" : "don't");
 
   /* Disable interrupts from the two channels. */
   write_control(c, 0, 2);
